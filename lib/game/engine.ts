@@ -72,6 +72,7 @@ export class GameEngine {
   private readonly SPAN_MS = 80_000;
   private lastSample = 0;
   private lastPxPush = 0;
+  private lastPriceText = 0;
   private bgCur: RGB = INK;
 
   // social pins
@@ -583,8 +584,18 @@ export class GameEngine {
 
   private drawHud() {
     if (!this.activeCall) {
-      const price = this.refs.price.current;
-      if (price) price.innerHTML = "<small>$</small>" + fmt(this.headP);
+      // ~4 ticks/sec off the RAW live price, with moving cents (rendered small) so the number
+      // visibly ticks and reads as a live, sensitive ticker even when the price barely moves.
+      const now = Date.now();
+      if (now - this.lastPriceText >= 250) {
+        this.lastPriceText = now;
+        const price = this.refs.price.current;
+        if (price) {
+          const p = this.price;
+          const cents = (Math.abs(p) % 1).toFixed(2).slice(1); // ".42"
+          price.innerHTML = "<small>$</small>" + fmt(Math.floor(p)) + `<small>${cents}</small>`;
+        }
+      }
       return;
     }
     const c = this.activeCall;
@@ -595,7 +606,7 @@ export class GameEngine {
     const pnlEl = this.refs.pnl.current;
     if (pnlEl) pnlEl.textContent = (pnl >= 0 ? "+" : "−") + "$" + fmt2(Math.abs(pnl));
     const lsub = this.refs.lsub.current;
-    if (lsub) lsub.textContent = `${this.opts.market.split("/")[0]} $${fmt(this.headP)} · entry $${fmt(c.entry)} · ${c.lev}x`;
+    if (lsub) lsub.textContent = `${this.opts.market.split("/")[0]} $${fmt2(this.headP)} · entry $${fmt2(c.entry)} · ${c.lev}x`;
     const cashBtn = this.refs.cashBtn.current;
     if (cashBtn) cashBtn.textContent = "CASH OUT · $" + fmt2(val);
     const now = Date.now();
@@ -641,11 +652,11 @@ export class GameEngine {
       mx = Math.max(mx, this.activeCall.entry);
     }
     // tighter padding + faster range adaptation = a more sensitive chart (small moves read bigger)
-    const pad = (mx - mn) * 0.12 || 0.5;
+    const pad = (mx - mn) * 0.07 || 0.3;
     mn -= pad;
     mx += pad;
-    this.smMn = this.smMn == null ? mn : this.smMn + (mn - this.smMn) * 0.14;
-    this.smMx = this.smMx == null ? mx : this.smMx + (mx - this.smMx) * 0.14;
+    this.smMn = this.smMn == null ? mn : this.smMn + (mn - this.smMn) * 0.17;
+    this.smMx = this.smMx == null ? mx : this.smMx + (mx - this.smMx) * 0.17;
     const sMn = this.smMn,
       sMx = this.smMx;
     const Y = (p: number) => TOP + (1 - (p - sMn) / (sMx - sMn || 1)) * BH;
