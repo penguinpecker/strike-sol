@@ -35,11 +35,11 @@ export function Header() {
         </button>
         <div
           className="bal"
-          onClick={connected ? () => openSheet("wallet") : undefined}
-          style={connected ? { cursor: "pointer" } : undefined}
-          title={connected ? "wallet" : undefined}
+          onClick={() => openSheet("wallet")}
+          style={{ cursor: "pointer" }}
+          title={connected ? "wallet · deposit / withdraw" : "connect to deposit"}
         >
-          <span className="l">{connected ? "wallet ›" : "balance"}</span>
+          <span className="l">wallet ›</span>
           <span className="v" key={String(usdcBalance)} id="bal">
             {connected ? (usdcBalance == null ? "…" : `$${fmt2(usdcBalance)}`) : "—"}
           </span>
