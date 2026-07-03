@@ -17,13 +17,14 @@ interface Props {
 export function CallStage({ priceRef, pnlRef, lsubRef, tleftRef, ringRef }: Props) {
   const call = useStrike((s) => s.call);
   const levSel = useStrike((s) => s.levSel);
+  const base = useStrike((s) => s.market).split("/")[0];
   const live = !!call;
 
   return (
     <div className="stage">
       <div id="idleWrap" style={{ display: live ? "none" : "flex", flexDirection: "column", alignItems: "center" }}>
         <h1 className="q" id="q">
-          {levSel >= 200 ? "FULL SEND — where's BTC in 30 seconds?" : "Where's BTC in 30 seconds?"}
+          {levSel >= 200 ? `FULL SEND — where's ${base} in 30 seconds?` : `Where's ${base} in 30 seconds?`}
         </h1>
         <div className="bignum mono" id="price" ref={priceRef}>
           <small>$</small>—

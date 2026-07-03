@@ -12,6 +12,7 @@ import type {
   Tab,
 } from "./types";
 import type { DriftPairConfig } from "./drift/types";
+import { config } from "./config";
 
 // Discrete game state (everything React renders). The 60fps hot path — price, pnl,
 // chart, timer — is NOT here; it lives in the imperative GameEngine driving refs.
@@ -19,6 +20,7 @@ import type { DriftPairConfig } from "./drift/types";
 export type SheetType = "feed" | "ranks" | "you" | "x" | "wallet" | "deposit" | "withdraw" | null;
 
 interface StrikeState {
+  market: string; // the market being traded, e.g. "BTC/USD" (switchable BTC <-> SOL)
   stake: number;
   levSel: number;
   streak: number;
@@ -57,6 +59,7 @@ interface StrikeState {
   _fid: number;
 
   // pure actions
+  setMarket: (m: string) => void;
   setStake: (s: number) => void;
   setLev: (l: number) => void;
   setUser: (h: string | null) => void;
@@ -93,6 +96,7 @@ interface StrikeState {
 }
 
 export const useStrike = create<StrikeState>((set, get) => ({
+  market: config.market,
   stake: 25,
   levSel: 50,
   streak: 0,
@@ -124,6 +128,7 @@ export const useStrike = create<StrikeState>((set, get) => ({
   refreshCollateral: null,
   _fid: 1,
 
+  setMarket: (m) => set({ market: m }),
   setStake: (s) => set({ stake: s }),
   setLev: (l) => set({ levSel: l }),
   setUser: (h) => set({ user: h ? { h } : null }),

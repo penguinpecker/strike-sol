@@ -11,6 +11,7 @@ export function ResolveOverlay() {
   const r = useStrike((s) => s.resolve);
   const clearResolve = useStrike((s) => s.clearResolve);
   const showToast = useStrike((s) => s.showToast);
+  const base = useStrike((s) => s.market).split("/")[0];
   const { handle } = useAuth();
 
   useEffect(() => {
@@ -24,7 +25,7 @@ export function ResolveOverlay() {
   const { how, win, pnl, pct, entry, dir, lev, secs, streak } = r;
 
   const share = async () => {
-    const txt = `I just ${win ? "CALLED" : "fumbled"} BTC on STRIKE ${(pct >= 0 ? "+" : "") + pct}%${handle ? ` — x.com/${handle}` : ""}`;
+    const txt = `I just ${win ? "CALLED" : "fumbled"} ${base} on STRIKE ${(pct >= 0 ? "+" : "") + pct}%${handle ? ` — x.com/${handle}` : ""}`;
     try {
       if (navigator.share) await navigator.share({ text: txt });
       else {
@@ -69,7 +70,7 @@ export function ResolveOverlay() {
           {(pct >= 0 ? "+" : "") + pct}%
         </div>
         <div className="cm" id="cmeta">
-          called BTC {dir > 0 ? "↑" : "↓"} at ${fmt(entry)} · {lev}x · {secs}s
+          called {base} {dir > 0 ? "↑" : "↓"} at ${fmt(entry)} · {lev}x · {secs}s
         </div>
         <div className="ref">{handle ? `@${handle}` : "your call"} — come fumble with me</div>
       </div>

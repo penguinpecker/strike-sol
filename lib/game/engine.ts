@@ -11,6 +11,7 @@ import { fmt, fmt2 } from "@/lib/format";
 import { blip, chime, thud, haptic } from "@/lib/audio";
 import { loadAvatar, avatarImage, addrColor } from "@/lib/social";
 import { recordCall } from "@/lib/persist";
+import { marketDef } from "@/lib/drift/networks";
 import { shortAddress } from "@/lib/solana/wallet";
 import type { Dir, Call, Marker } from "@/lib/types";
 import type { RecentTrade } from "@/lib/drift/types";
@@ -39,7 +40,9 @@ export interface EngineOpts {
 }
 
 type RGB = [number, number, number];
-const INK: RGB = [11, 11, 12];
+const INK: RGB = [12, 10, 22];
+// fluorescent violet (#C77DFF) — the chart's neon glow; the core line stays white on top of it
+const CHART: string = "199,125,255";
 const WIN: RGB = [0, 230, 118];
 const WIN2: RGB = [0, 78, 42];
 const LOSE: RGB = [255, 59, 78];
@@ -186,6 +189,38 @@ export class GameEngine {
   setSigner(s: Signer | null) {
     if (s === null && this.activeCall && this.opts.mode === "live") return;
     this.signer = s ?? new UnwiredSigner();
+  }
+
+  // Switch the traded market (e.g. BTC/USD <-> SOL/USD). Blocked mid-call. Swaps the price feed
+  // to the new market's Pyth feed, resets the chart, and reloads its pair config; trades then
+  // resolve to the new market's Drift perp automatically.
+  setMarket(market: string) {
+    if (this.activeCall || this.opening || market === this.opts.market) return;
+    const def = marketDef(market);
+    this.opts.market = market;
+    this.opts.pythFeedId = def.pythFeedId;
+    this.opts.binanceSymbol = def.binanceSymbol;
+    this.opts.coinbaseProduct = def.coinbaseProduct;
+    this.feed.stop();
+    this.feed = new PriceFeed({
+      primary: this.opts.primary,
+      pythFeedId: def.pythFeedId,
+      binanceSymbol: def.binanceSymbol,
+      coinbaseProduct: def.coinbaseProduct,
+      onTick: (t) => this.onPrice(t.price),
+      onStatus: this.opts.onStatus,
+    });
+    this.pts = [];
+    this.price = 0;
+    this.headP = 0;
+    this.smMn = null;
+    this.smMx = null;
+    this.markers = [];
+    store().setPairConfig(null);
+    store().setDisplayPrice(0);
+    void this.loadSeed();
+    void this.loadPairConfig();
+    this.feed.start();
   }
 
   // Re-poll the connected wallet's real USDC shortly after a trade settles on-chain
@@ -517,7 +552,7 @@ export class GameEngine {
 
   // ── the 60fps render: canvas + hot-path text + eased background ──
   private draw() {
-    this.headP += (this.price - this.headP) * 0.16;
+    this.headP += (this.price - this.headP) * 0.24;
     this.drawBackground();
     this.drawChart();
     this.drawHud();
@@ -605,16 +640,16 @@ export class GameEngine {
       mn = Math.min(mn, this.activeCall.entry);
       mx = Math.max(mx, this.activeCall.entry);
     }
-    const pad = (mx - mn) * 0.22 || 1;
+    // tighter padding + faster range adaptation = a more sensitive chart (small moves read bigger)
+    const pad = (mx - mn) * 0.12 || 0.5;
     mn -= pad;
     mx += pad;
-    this.smMn = this.smMn == null ? mn : this.smMn + (mn - this.smMn) * 0.08;
-    this.smMx = this.smMx == null ? mx : this.smMx + (mx - this.smMx) * 0.08;
+    this.smMn = this.smMn == null ? mn : this.smMn + (mn - this.smMn) * 0.14;
+    this.smMx = this.smMx == null ? mx : this.smMx + (mx - this.smMx) * 0.14;
     const sMn = this.smMn,
       sMx = this.smMx;
     const Y = (p: number) => TOP + (1 - (p - sMn) / (sMx - sMn || 1)) * BH;
-    const ref = this.pts[Math.max(0, this.pts.length - 21)] || this.pts[0];
-    const AC = this.headP >= ref.p ? "0,255,133" : "255,59,78";
+    const AC = CHART;
 
     x.font = "700 11px JetBrains Mono";
     x.textAlign = "right";

@@ -22,7 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         appId={config.privyAppId}
         config={{
           loginMethods: ["twitter"],
-          appearance: { theme: "dark", accentColor: "#00FF85", walletChainType: "solana-only" },
+          appearance: { theme: "dark", accentColor: "#AB9FF2", walletChainType: "solana-only" },
           embeddedWallets: {
             solana: { createOnLogin: "users-without-wallets" },
           },

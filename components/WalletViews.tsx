@@ -75,7 +75,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
     return (
       <>
         <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          {balCard("Drift collateral · tradable", collateral, "#00FF85")}
+          {balCard("Drift collateral · tradable", collateral, "#AB9FF2")}
           {balCard("Wallet USDC · idle", bal, "#8A8F98")}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -174,7 +174,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
       <div className="sub" style={{ marginBottom: 8 }}>
         withdraw <b>USDC</b> from Drift collateral back to your Solana wallet.
       </div>
-      {balCard("Drift collateral · available", collateral, "#00FF85")}
+      {balCard("Drift collateral · available", collateral, "#AB9FF2")}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <input
           className="xin"

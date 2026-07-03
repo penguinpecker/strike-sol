@@ -10,6 +10,7 @@ import type { Dir } from "@/lib/types";
 import { Header } from "./Header";
 import { NotiRails } from "./NotiRails";
 import { CallStage } from "./CallStage";
+import { MarketSelect } from "./MarketSelect";
 import { Arrows } from "./Arrows";
 import { Controls } from "./Controls";
 import { CashOut } from "./CashOut";
@@ -80,6 +81,10 @@ export default function Strike() {
       makeCall: (d: Dir) => engineRef.current?.makeCall(d),
       cashOut: () => engineRef.current?.cashOut(),
       setSigner: (s) => engineRef.current?.setSigner(s),
+      setMarket: (m: string) => {
+        engineRef.current?.setMarket(m);
+        useStrike.getState().setMarket(m);
+      },
     }),
     [],
   );
@@ -92,6 +97,7 @@ export default function Strike() {
         <NotiRails />
         <div className={resolving ? "layout hide" : "layout"}>
           <section className="colmid">
+            <MarketSelect />
             <CallStage priceRef={priceRef} pnlRef={pnlRef} lsubRef={lsubRef} tleftRef={tleftRef} ringRef={ringRef} />
             <Arrows />
             <Controls />

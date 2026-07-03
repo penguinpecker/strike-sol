@@ -11,12 +11,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0B0B0C",
-        ink2: "#161618",
+        ink: "#0C0A16",
+        ink2: "#171326",
         win: "#00E676",
         lose: "#FF3B4E",
         ng: "#00FF85",
         nr: "#FF3B4E",
+        acc: "#AB9FF2",
+        acc2: "#C77DFF",
       },
       fontFamily: {
         baloo: ["var(--font-baloo)", "cursive"],

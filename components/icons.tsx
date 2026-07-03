@@ -2,7 +2,7 @@
 
 export const BrandMark = ({ size = 24 }: { size?: number }) => (
   <svg viewBox="0 0 28 28" width={size} height={size}>
-    <circle cx="14" cy="14" r="14" fill="#fff" />
+    <circle cx="14" cy="14" r="14" fill="#AB9FF2" />
     <path
       d="M14 5.6C10.6 8.1 10.6 11 14 13.4C17.4 15.8 17.4 18.7 14 21.2M14 5.6C17.4 8.1 17.4 11 14 13.4C10.6 15.8 10.6 18.7 14 21.2"
       fill="none"
