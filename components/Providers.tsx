@@ -24,6 +24,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
           loginMethods: ["twitter"],
           appearance: { theme: "dark", accentColor: "#AB9FF2", walletChainType: "solana-only" },
           embeddedWallets: {
+            // auto-sign (no confirmation modal per tap) — tap-to-trade UX. Requires the app's
+            // "enforce wallet UIs" to be OFF in the Privy dashboard for it to take full effect.
+            showWalletUIs: false,
             solana: { createOnLogin: "users-without-wallets" },
           },
           solana: {

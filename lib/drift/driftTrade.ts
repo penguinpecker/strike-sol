@@ -84,11 +84,38 @@ async function getClient(ctx: LiveContext): Promise<{ client: Any; connection: A
     spotMarketIndexes,
     oracleInfos,
     accountSubscription: { type: "websocket" },
+    // priority fee so opens/closes land fast (computeUnitsPrice = micro-lamports per CU).
+    // 100k µlamports × 600k CU ≈ 0.00006 SOL — cheap, but jumps the queue for quick entry/exit.
+    txParams: { computeUnits: 600_000, computeUnitsPrice: 100_000 },
   });
   await client.subscribe();
+  // If this wallet already has a Drift account, start tracking it now so reads (collateral) and
+  // orders resolve. If it doesn't exist yet, addUser throws — harmless; we track it right after we
+  // create it (see trackUser).
+  try {
+    if (!client.hasUser(0)) await client.addUser(0, ctx.wallet.publicKey);
+  } catch {
+    /* no on-chain account yet */
+  }
   const entry = { client, connection };
   clientCache.set(addr, entry);
   return entry;
+}
+
+// Ensure the DriftClient is tracking (subscribed to) the wallet's subaccount 0, then load its
+// on-chain data. Must run AFTER the account is created, before placing an order — otherwise
+// client.getUser() throws "DriftClient has no user".
+async function trackUser(client: Any, authority: Any) {
+  try {
+    if (!client.hasUser(0)) await client.addUser(0, authority);
+  } catch {
+    /* ignore */
+  }
+  try {
+    await client.getUser().fetchAccounts();
+  } catch {
+    /* ignore */
+  }
 }
 
 function perpMarketIndex(drift: Any, base: string, env: string): number {
@@ -120,7 +147,9 @@ function marketMaxLeverage(drift: Any, client: Any, marketIndex: number): number
 export async function getDriftCollateral(ctx: LiveContext): Promise<number> {
   try {
     const { client } = await getClient(ctx);
+    await trackUser(client, ctx.wallet.publicKey);
     const drift = await import("@drift-labs/sdk");
+    if (!client.hasUser(0)) return 0; // no Drift account yet
     const user = client.getUser();
     const fc = user.getFreeCollateral(); // BN, QUOTE_PRECISION (1e6)
     return drift.convertToNumber(fc, drift.QUOTE_PRECISION);
@@ -145,6 +174,8 @@ export async function openMarketLive(p: OpenLiveParams, ctx: LiveContext): Promi
 
   // live: ensure the user's Drift account exists + has SOL collateral, then size + place the order.
   await ensureCollateral(client, drift, connection, ctx, p.stake);
+  // start tracking the (possibly just-created) subaccount so placePerpOrder can resolve the user.
+  await trackUser(client, ctx.wallet.publicKey);
 
   // stake is in SOL. Notional (USD) = stakeSOL × SOL/USD × leverage, clamped to the perp's real max.
   const solUsd = drift.convertToNumber(client.getOracleDataForSpotMarket(SOL_SPOT_INDEX).price, drift.PRICE_PRECISION);
@@ -189,11 +220,12 @@ export async function depositCollateral(
   if (!broadcast) return { amount };
 
   const depositAmount = solAmount(drift, amount);
-  const hasUser = await userExists(client);
+  const hasUser = await userExists(client, connection);
   const txSig: string = hasUser
     ? await client.deposit(depositAmount, SOL_SPOT_INDEX, ctx.wallet.publicKey)
     : await client.initializeUserAccountAndDepositCollateral(depositAmount, ctx.wallet.publicKey, SOL_SPOT_INDEX);
   await confirm(connection, txSig);
+  await trackUser(client, ctx.wallet.publicKey);
   return { txhash: txSig, amount };
 }
 
@@ -220,7 +252,7 @@ async function ensureCollateral(
   ctx: LiveContext,
   neededSol: number,
 ) {
-  const hasUser = await userExists(client);
+  const hasUser = await userExists(client, connection);
   if (hasUser) return;
   const depositAmount = solAmount(drift, neededSol);
   const sig: string = await client.initializeUserAccountAndDepositCollateral(
@@ -231,11 +263,13 @@ async function ensureCollateral(
   await confirm(connection, sig);
 }
 
-async function userExists(client: Any): Promise<boolean> {
+// Does the wallet's Drift subaccount 0 exist ON-CHAIN? Derive the PDA and check the account directly
+// — reliable even when the client isn't tracking the user yet (client.getUser() would just throw).
+async function userExists(client: Any, connection: Any): Promise<boolean> {
   try {
-    const user = client.getUser();
-    if (user.fetchAccounts) await user.fetchAccounts();
-    return !!user.getUserAccount();
+    const pk = await client.getUserAccountPublicKey();
+    const info = await connection.getAccountInfo(pk);
+    return !!info;
   } catch {
     return false;
   }
