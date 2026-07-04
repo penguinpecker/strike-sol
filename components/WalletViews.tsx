@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { useStrike } from "@/lib/store";
 import { useAuth } from "./auth/AuthContext";
 import { fmt2 } from "@/lib/format";
@@ -27,6 +28,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
   const [amt, setAmt] = useState("");
   const [depAmt, setDepAmt] = useState("");
   const [busy, setBusy] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
 
   const addr = auth.solAddress;
 
@@ -34,6 +36,21 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
   useEffect(() => {
     refreshCollateral?.();
   }, [view, refreshCollateral]);
+
+  // build a QR of the wallet address for the deposit view (generated locally, no external call)
+  useEffect(() => {
+    if (view !== "deposit" || !addr) {
+      setQr(null);
+      return;
+    }
+    let on = true;
+    QRCode.toDataURL(addr, { margin: 1, width: 320, color: { dark: "#12101F", light: "#FFFFFF" } })
+      .then((url) => on && setQr(url))
+      .catch(() => {});
+    return () => {
+      on = false;
+    };
+  }, [view, addr]);
 
   if (!auth.connected || !addr) {
     return (
@@ -119,8 +136,54 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
     const depValid = depNum > 0 && depNum <= walletNum;
     return (
       <>
-        <div className="sub" style={{ marginBottom: 8 }}>
-          move USDC from your wallet into <b>Drift</b> collateral so it can back your calls.
+        <div className="sub" style={{ marginBottom: 10 }}>
+          <b>1.</b> send USDC to your address below to fund your wallet · <b>2.</b> deposit it into Drift to back your calls.
+        </div>
+        {/* deposit address — send USDC here to fund the wallet */}
+        <div
+          style={{
+            borderRadius: 16,
+            padding: "14px",
+            background: "rgba(171,159,242,.07)",
+            border: "1.5px solid rgba(171,159,242,.28)",
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ fontSize: 10, letterSpacing: ".12em", color: "var(--wt4)", fontWeight: 700, textTransform: "uppercase", marginBottom: 10 }}>
+            your Solana deposit address
+          </div>
+          {qr && (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qr} alt="deposit address QR" width={148} height={148} style={{ borderRadius: 12, background: "#fff", padding: 7 }} />
+            </div>
+          )}
+          <button
+            type="button"
+            className="mono"
+            onClick={() => navigator.clipboard?.writeText(addr).then(() => showToast("address copied")).catch(() => showToast("copy failed"))}
+            title="tap to copy"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+              background: "rgba(255,255,255,.05)",
+              border: "1px solid rgba(255,255,255,.12)",
+              borderRadius: 10,
+              padding: "10px 11px",
+              color: "#fff",
+              fontSize: 12,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            <span style={{ wordBreak: "break-all", lineHeight: 1.35 }}>{addr}</span>
+            <i className="ph ph-copy" style={{ color: "var(--acc)", flexShrink: 0, fontSize: 16 }} />
+          </button>
+          <div className="sub" style={{ marginTop: 8 }}>
+            send <b>USDC</b> on <b>Solana</b> here from any exchange or wallet. USDC on Solana only — other tokens or networks may be lost.
+          </div>
         </div>
         {balCard("in your wallet", bal, "#8A8F98")}
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
