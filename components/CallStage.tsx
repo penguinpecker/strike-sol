@@ -2,6 +2,7 @@
 
 import type { RefObject } from "react";
 import { useStrike } from "@/lib/store";
+import { FULL_SEND } from "@/lib/constants";
 
 interface Props {
   priceRef: RefObject<HTMLDivElement | null>;
@@ -24,7 +25,7 @@ export function CallStage({ priceRef, pnlRef, lsubRef, tleftRef, ringRef }: Prop
     <div className="stage">
       <div id="idleWrap" style={{ display: live ? "none" : "flex", flexDirection: "column", alignItems: "center" }}>
         <h1 className="q" id="q">
-          {levSel >= 200 ? `FULL SEND — where's ${base} in 30 seconds?` : `Where's ${base} in 30 seconds?`}
+          {levSel >= FULL_SEND ? `FULL SEND — where's ${base} in 30 seconds?` : `Where's ${base} in 30 seconds?`}
         </h1>
         <div className="bignum mono" id="price" ref={priceRef}>
           <small>$</small>—
@@ -37,7 +38,7 @@ export function CallStage({ priceRef, pnlRef, lsubRef, tleftRef, ringRef }: Prop
       <div id="liveWrap" style={{ display: live ? "flex" : "none", flexDirection: "column", alignItems: "center" }}>
         <h1 className="q" id="lq">
           {call
-            ? `You called ${call.dir > 0 ? "↑ HIGHER" : "↓ LOWER"}${call.lev >= 200 ? " · FULL SEND" : ` · ${call.lev}x`}`
+            ? `You called ${call.dir > 0 ? "↑ HIGHER" : "↓ LOWER"}${call.lev >= FULL_SEND ? " · FULL SEND" : ` · ${call.lev}x`}`
             : ""}
         </h1>
         <div className="bignum" id="pnl" ref={pnlRef}>

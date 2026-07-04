@@ -2,9 +2,9 @@
 
 import { useEffect } from "react";
 import { useStrike } from "@/lib/store";
-import { LEVS, STAKES } from "@/lib/constants";
+import { LEVS, STAKES, FULL_SEND } from "@/lib/constants";
 import { quoteCost } from "@/lib/drift/rail";
-import { fmt, sol } from "@/lib/format";
+import { fmt, fmt2, sol } from "@/lib/format";
 import { config, baseAsset } from "@/lib/config";
 import { blip, haptic } from "@/lib/audio";
 
@@ -12,18 +12,20 @@ function WinHint() {
   const stake = useStrike((s) => s.stake);
   const lev = useStrike((s) => s.levSel);
   const cfg = useStrike((s) => s.pairConfig);
+  const solUsd = useStrike((s) => s.solPrice) || 0;
   const price = useStrike((s) => s.displayPrice) || 63000;
 
-  const skull = lev >= 100 ? <> · bust = lose it all <i className="ph-fill ph-skull" /></> : null;
+  const skull = lev >= FULL_SEND ? <> · bust = lose it all <i className="ph-fill ph-skull" /></> : null;
 
   if (cfg) {
-    const notional = stake * lev;
     const q = quoteCost({ stake, leverage: lev, side: "long" }, cfg, config.platformFeeRate);
-    if (notional < cfg.minPositionValue && config.mode === "live") {
-      const minLev = Math.ceil(cfg.minPositionValue / stake);
+    // min position is a USD notional; the stake is SOL, so value it first.
+    const notionalUsd = stake * solUsd * lev;
+    if (config.mode === "live" && solUsd > 0 && notionalUsd < cfg.minPositionValue) {
+      const minLev = Math.min(cfg.maxLeverage, Math.ceil(cfg.minPositionValue / (stake * solUsd || 1)));
       return (
         <>
-          {sol(stake)} at {lev}x = {sol(notional)} notional — below {sol(cfg.minPositionValue)} min · need <b>{minLev}x+</b>
+          {sol(stake)} (~${fmt2(stake * solUsd)}) at {lev}x = ${fmt(notionalUsd)} — below ${cfg.minPositionValue} min · need <b>{minLev}x+</b>
         </>
       );
     }

@@ -32,9 +32,10 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
     setUser(handle);
   }, [handle, setUser]);
 
-  // poll the user's real USDC (collateral) + native SOL (gas) balances
+  // poll the user's real USDC (collateral) + native SOL (gas) balances + the live SOL/USD price
   const setUsdcBalance = useStrike((s) => s.setUsdcBalance);
   const setSolBalance = useStrike((s) => s.setSolBalance);
+  const setSolPrice = useStrike((s) => s.setSolPrice);
   const setRefreshBalance = useStrike((s) => s.setRefreshBalance);
   useEffect(() => {
     if (!solAddress) {
@@ -46,16 +47,23 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
     let alive = true;
     const fetchBal = async () => {
       try {
-        const r = await fetch(`/api/drift/balance?address=${solAddress}&network=${config.network}`);
-        if (r.ok && alive) {
-          const d = await r.json();
+        const [rb, rp] = await Promise.all([
+          fetch(`/api/drift/balance?address=${solAddress}&network=${config.network}`),
+          fetch(`/api/drift/price?symbol=SOL/USD`),
+        ]);
+        if (rb.ok && alive) {
+          const d = await rb.json();
           // on an RPC error the route returns null — keep the last known value rather than
           // flashing $0 (which would read as an empty wallet and reject taps).
           if (typeof d.usdc === "number") setUsdcBalance(d.usdc);
           if (typeof d.sol === "number") setSolBalance(d.sol);
         }
+        if (rp.ok && alive) {
+          const p = await rp.json();
+          if (typeof p.price === "number") setSolPrice(p.price);
+        }
       } catch {
-        /* network — keep last known balance */
+        /* network — keep last known values */
       }
     };
     fetchBal();
@@ -66,7 +74,7 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
       clearInterval(h);
       setRefreshBalance(null);
     };
-  }, [solAddress, setUsdcBalance, setSolBalance, setRefreshBalance]);
+  }, [solAddress, setUsdcBalance, setSolBalance, setSolPrice, setRefreshBalance]);
 
   // register the connected user's 𝕏 identity keyed by their wallet address, so their own trades
   // in the feed/rails (which arrive by on-chain address) render with their real name + avatar.

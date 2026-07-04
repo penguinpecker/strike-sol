@@ -13,10 +13,12 @@ const HERMES = "https://hermes.pyth.network";
 
 // Drift taker/leverage defaults per market (refined by the SDK on the live path; these drive the
 // pre-trade validation + cost preview). Drift majors run ~10 bps taker, ~20x max.
+// minNotional is a USD floor sitting just above Drift's real min order size (BTC-PERP min is
+// 0.0001 BTC ≈ $6-7), so a passing order isn't rejected on-chain. maxLev = Drift's real cap.
 const PAIR_DEFAULTS: Record<string, { taker: number; maker: number; minNotional: number; maxLev: number }> = {
-  "BTC/USD": { taker: 0.001, maker: 0.0004, minNotional: 5, maxLev: 20 },
-  "ETH/USD": { taker: 0.001, maker: 0.0004, minNotional: 5, maxLev: 20 },
-  "SOL/USD": { taker: 0.001, maker: 0.0004, minNotional: 5, maxLev: 20 },
+  "BTC/USD": { taker: 0.001, maker: 0.0004, minNotional: 7, maxLev: 20 },
+  "ETH/USD": { taker: 0.001, maker: 0.0004, minNotional: 7, maxLev: 20 },
+  "SOL/USD": { taker: 0.001, maker: 0.0004, minNotional: 7, maxLev: 20 },
 };
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {

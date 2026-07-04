@@ -4,7 +4,7 @@ import type { RefObject } from "react";
 import gsap from "gsap";
 import confetti from "canvas-confetti";
 import { PriceFeed, type FeedSource, type FeedStatus } from "@/lib/feed/priceFeed";
-import { quoteCost, validateTap, UnwiredSigner, DriftRailError, type Side, type Signer } from "@/lib/drift/rail";
+import { quoteCost, validateInputs, UnwiredSigner, DriftRailError, type Side, type Signer } from "@/lib/drift/rail";
 import { useStrike } from "@/lib/store";
 import { config } from "@/lib/config";
 import { fmt, fmt2, sol } from "@/lib/format";
@@ -246,15 +246,21 @@ export class GameEngine {
     const intent = { stake: s.stake, leverage: s.levSel, side: (dir > 0 ? "long" : "short") as Side };
     const lowBal = () =>
       s.showToast(bal <= 0 ? "no SOL — send some to play" : `${sol(intent.stake)} stake > your ${sol(bal)} — lower it`);
-    if (s.pairConfig) {
-      const v = validateTap(intent, s.pairConfig, bal);
-      if (!v.ok) {
-        if (v.code === "BELOW_MIN_NOTIONAL" && this.opts.mode === "live") return s.showToast(v.reason || "below minimum");
-        if (v.code === "INSUFFICIENT_BALANCE") return lowBal();
-        if (v.code === "BAD_INPUT") return s.showToast(v.reason || "bad input");
+    const inp = validateInputs(intent);
+    if (!inp.ok) return s.showToast(inp.reason || "bad input");
+    if (intent.stake > bal) return lowBal();
+    // live: enforce Drift's real leverage cap + min position, valued in USD (the stake is in SOL)
+    if (this.opts.mode === "live" && s.pairConfig) {
+      const cfg = s.pairConfig;
+      if (intent.leverage > cfg.maxLeverage) return s.showToast(`max leverage is ${cfg.maxLeverage}x`);
+      const solUsd = s.solPrice ?? 0;
+      const stakeUsd = intent.stake * solUsd;
+      if (solUsd > 0 && stakeUsd * intent.leverage < cfg.minPositionValue) {
+        const need = Math.ceil(cfg.minPositionValue / (stakeUsd || 1));
+        return need > cfg.maxLeverage
+          ? s.showToast(`stake too small — raise it (min position $${cfg.minPositionValue})`)
+          : s.showToast(`~$${fmt2(stakeUsd)} needs ≥${need}x to clear the $${cfg.minPositionValue} min`);
       }
-    } else if (s.stake > bal) {
-      return lowBal();
     }
 
     let marketIndex: number | undefined;
