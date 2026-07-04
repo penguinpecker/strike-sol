@@ -26,9 +26,9 @@ const HEAD: Record<Exclude<SheetType, null>, [string, string]> = {
   ranks: ["🏆 Top traders", "live · ranked by realized pnl on-chain"],
   you: ["You", ""],
   x: ["Sign in with 𝕏", "your pfp becomes your pin on the chart — entries, exits, PnL%"],
-  wallet: ["Wallet", "your USDC on Solana · non-custodial"],
-  deposit: ["Deposit", "fund Drift with USDC"],
-  withdraw: ["Withdraw", "USDC back to your wallet"],
+  wallet: ["Wallet", "your SOL on Solana · non-custodial"],
+  deposit: ["Deposit", "fund Drift with SOL"],
+  withdraw: ["Withdraw", "SOL back to your wallet"],
 };
 
 export function FeedSheet() {

@@ -4,21 +4,20 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useStrike } from "@/lib/store";
 import { useAuth } from "./auth/AuthContext";
-import { fmt2 } from "@/lib/format";
+import { fmt2, sol as fmtSol } from "@/lib/format";
 import { shortAddress } from "@/lib/solana/wallet";
 import { XLogo } from "./icons";
 
-// Wallet / deposit / withdraw — the user's real USDC (non-custodial; their Privy Solana wallet).
-//   Wallet USDC      = spendable USDC sitting in the wallet (what you deposit FROM)
-//   Drift collateral = USDC posted to Drift, the margin your calls actually trade against
-//   deposit  = wallet USDC  → Drift collateral
-//   withdraw = Drift collat → wallet USDC
+// Wallet / deposit / withdraw — the game runs on the user's native SOL.
+//   Wallet SOL     = spendable SOL in the wallet (what you play + deposit with)
+//   Drift margin   = SOL posted to Drift as collateral (backs live calls), shown as its USD value
+//   deposit  = wallet SOL  → Drift collateral
+//   withdraw = Drift collat → wallet SOL
 // Everything is signed by the user's own wallet; STRIKE never takes custody.
 export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" }) {
   const auth = useAuth();
-  const bal = useStrike((s) => s.usdcBalance);
-  const sol = useStrike((s) => s.solBalance);
-  const collateral = useStrike((s) => s.driftCollateral);
+  const solBal = useStrike((s) => s.solBalance);
+  const collateral = useStrike((s) => s.driftCollateral); // USD value of Drift margin
   const openSheet = useStrike((s) => s.openSheet);
   const closeSheet = useStrike((s) => s.closeSheet);
   const showToast = useStrike((s) => s.showToast);
@@ -33,12 +32,10 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
 
   const addr = auth.solAddress;
 
-  // load the live Drift collateral whenever the wallet/deposit/withdraw sheet opens
   useEffect(() => {
     refreshCollateral?.();
   }, [view, refreshCollateral]);
 
-  // build a QR of the wallet address for the deposit view (generated locally, no external call)
   useEffect(() => {
     if (view !== "deposit" || !addr) {
       setQr(null);
@@ -57,58 +54,32 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
     return (
       <>
         <div className="sub" style={{ marginBottom: 10 }}>connect 𝕏 to open your wallet</div>
-        <button
-          className="xgo"
-          onClick={() => {
-            // close the sheet first so the Privy login modal opens on a clean screen, never behind it
-            closeSheet();
-            auth.login();
-          }}
-        >
+        <button className="xgo" onClick={() => { closeSheet(); auth.login(); }}>
           <XLogo size={15} /> CONNECT 𝕏
         </button>
       </>
     );
   }
-  const walletNum = bal ?? 0;
-  const collatNum = collateral ?? 0;
+  const solNum = solBal ?? 0;
 
   const nudge = () => {
     setTimeout(() => { refreshBalance?.(); refreshCollateral?.(); }, 2500);
     setTimeout(() => { refreshBalance?.(); refreshCollateral?.(); }, 8000);
   };
 
-  const balCard = (label: string, value: number | null, accent: string) => (
-    <div
-      style={{
-        flex: 1,
-        borderRadius: 16,
-        padding: "14px 14px",
-        background: `${accent}12`,
-        border: `1.5px solid ${accent}39`,
-      }}
-    >
-      <div style={{ fontSize: 10, letterSpacing: ".12em", color: "var(--wt4)", fontWeight: 700, textTransform: "uppercase" }}>
-        {label}
-      </div>
-      <div className="baloo" style={{ fontSize: 28, fontWeight: 800, marginTop: 3 }}>
-        {value == null ? "…" : `$${fmt2(value)}`}
-      </div>
+  const card = (label: string, display: string, accent: string) => (
+    <div style={{ flex: 1, borderRadius: 16, padding: "14px 14px", background: `${accent}12`, border: `1.5px solid ${accent}39` }}>
+      <div style={{ fontSize: 10, letterSpacing: ".12em", color: "var(--wt4)", fontWeight: 700, textTransform: "uppercase" }}>{label}</div>
+      <div className="baloo" style={{ fontSize: 28, fontWeight: 800, marginTop: 3 }}>{display}</div>
     </div>
   );
 
   if (view === "wallet") {
     return (
       <>
-        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-          {balCard("Drift collateral · tradable", collateral, "#AB9FF2")}
-          {balCard("Wallet USDC · idle", bal, "#8A8F98")}
-        </div>
-        <div
-          className="mono"
-          style={{ fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, color: sol != null && sol < 0.003 ? "#FFB23E" : "var(--wt4)" }}
-        >
-          ◎ {sol == null ? "…" : sol.toFixed(3)} SOL for gas{sol != null && sol < 0.003 ? " · add a little for fees" : ""}
+        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+          {card("Wallet SOL · your balance", solBal == null ? "…" : fmtSol(solBal), "#AB9FF2")}
+          {card("Drift margin · tradable", collateral == null ? "—" : `$${fmt2(collateral)}`, "#8A8F98")}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button className="xgo" style={{ flex: 1 }} onClick={() => openSheet("deposit")}>
@@ -132,7 +103,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
           </button>
         </div>
         <div className="sub" style={{ marginTop: 10 }}>
-          your funds stay in your wallet — STRIKE never holds them. Only Drift collateral backs a live call; it unlocks the moment the position closes.
+          your funds stay in your wallet — STRIKE never holds them. Deposit posts SOL as Drift collateral to back a live call; it unlocks the moment the position closes.
         </div>
       </>
     );
@@ -140,22 +111,13 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
 
   if (view === "deposit") {
     const depNum = Number(depAmt) || 0;
-    const depValid = depNum > 0 && depNum <= walletNum;
+    const depValid = depNum > 0 && depNum <= solNum;
     return (
       <>
         <div className="sub" style={{ marginBottom: 10 }}>
-          <b>1.</b> send USDC to your address below to fund your wallet · <b>2.</b> deposit it into Drift to back your calls.
+          <b>1.</b> send SOL to your address below to fund your wallet · <b>2.</b> deposit it into Drift to back your calls.
         </div>
-        {/* deposit address — send USDC here to fund the wallet */}
-        <div
-          style={{
-            borderRadius: 16,
-            padding: "14px",
-            background: "rgba(171,159,242,.07)",
-            border: "1.5px solid rgba(171,159,242,.28)",
-            marginBottom: 10,
-          }}
-        >
+        <div style={{ borderRadius: 16, padding: "14px", background: "rgba(171,159,242,.07)", border: "1.5px solid rgba(171,159,242,.28)", marginBottom: 10 }}>
           <div style={{ fontSize: 10, letterSpacing: ".12em", color: "var(--wt4)", fontWeight: 700, textTransform: "uppercase", marginBottom: 10 }}>
             your Solana deposit address
           </div>
@@ -170,46 +132,27 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
             className="mono"
             onClick={() => navigator.clipboard?.writeText(addr).then(() => showToast("address copied")).catch(() => showToast("copy failed"))}
             title="tap to copy"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: "100%",
-              background: "rgba(255,255,255,.05)",
-              border: "1px solid rgba(255,255,255,.12)",
-              borderRadius: 10,
-              padding: "10px 11px",
-              color: "#fff",
-              fontSize: 12,
-              cursor: "pointer",
-              textAlign: "left",
-            }}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.12)", borderRadius: 10, padding: "10px 11px", color: "#fff", fontSize: 12, cursor: "pointer", textAlign: "left" }}
           >
             <span style={{ wordBreak: "break-all", lineHeight: 1.35 }}>{addr}</span>
             <i className="ph ph-copy" style={{ color: "var(--acc)", flexShrink: 0, fontSize: 16 }} />
           </button>
           <div className="sub" style={{ marginTop: 8 }}>
-            send <b>USDC</b> (to trade) and a little <b>SOL</b> (for gas) on <b>Solana</b> here, from any exchange or wallet. Native SOL and USDC only — a different token or a wrong network may be lost.
+            send <b>SOL</b> on <b>Solana</b> here from any exchange or wallet. Native SOL only — a wrong token or network may be lost.
           </div>
         </div>
-        {balCard("in your wallet", bal, "#8A8F98")}
-        <div
-          className="mono"
-          style={{ fontSize: 11, fontWeight: 700, textAlign: "center", marginTop: 8, color: sol != null && sol < 0.003 ? "#FFB23E" : "var(--wt4)" }}
-        >
-          ◎ {sol == null ? "…" : sol.toFixed(3)} SOL for gas
-        </div>
+        {card("in your wallet", solBal == null ? "…" : fmtSol(solBal), "#8A8F98")}
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           <input
             className="xin"
             inputMode="decimal"
-            placeholder="amount (USDC)"
+            placeholder="amount (SOL)"
             value={depAmt}
             onChange={(e) => setDepAmt(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
             style={{ flex: 1 }}
           />
-          <button className="xin" style={{ width: 64, cursor: "pointer", color: "var(--accent, #00ff85)" }} onClick={() => setDepAmt(String(walletNum))}>
+          <button className="xin" style={{ width: 64, cursor: "pointer", color: "var(--acc)" }} onClick={() => setDepAmt(String(Math.max(0, solNum - 0.03)))}>
             MAX
           </button>
         </div>
@@ -235,43 +178,31 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
           {busy ? "DEPOSITING…" : "DEPOSIT TO DRIFT"}
         </button>
         <div className="sub" style={{ marginTop: 10 }}>
-          signed by your Privy wallet — one Solana transaction. Needs a little SOL for gas.
+          signed by your Privy wallet — one Solana transaction. Keep ~0.03 SOL for account rent + gas.
         </div>
-        <a
-          className="xgo"
-          href="https://jup.ag/swap/SOL-USDC"
-          target="_blank"
-          rel="noopener"
-          style={{ textDecoration: "none", display: "block", textAlign: "center", marginTop: 8, background: "rgba(255,255,255,.08)", color: "#fff", border: "1px solid rgba(255,255,255,.16)" }}
-        >
-          NO USDC? GET SOME ON JUPITER ↗
-        </a>
       </>
     );
   }
 
-  // withdraw — pull USDC out of Drift collateral back to your own wallet
+  // withdraw — pull SOL out of Drift collateral back to your own wallet
   const amtNum = Number(amt) || 0;
-  const valid = amtNum > 0 && amtNum <= collatNum;
+  const valid = amtNum > 0;
   return (
     <>
       <div className="sub" style={{ marginBottom: 8 }}>
-        withdraw <b>USDC</b> from Drift collateral back to your Solana wallet.
+        withdraw <b>SOL</b> from Drift collateral back to your Solana wallet.
       </div>
-      {balCard("Drift collateral · available", collateral, "#AB9FF2")}
+      {card("Drift margin · available", collateral == null ? "—" : `$${fmt2(collateral)}`, "#AB9FF2")}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <input
           className="xin"
           inputMode="decimal"
-          placeholder="amount (USDC)"
+          placeholder="amount (SOL)"
           value={amt}
           onChange={(e) => setAmt(e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
           style={{ flex: 1 }}
         />
-        <button className="xin" style={{ width: 64, cursor: "pointer", color: "var(--accent, #00ff85)" }} onClick={() => setAmt(String(collatNum))}>
-          MAX
-        </button>
       </div>
       <button
         className="xgo"
@@ -295,7 +226,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
         {busy ? "SIGNING…" : "WITHDRAW"}
       </button>
       <div className="sub" style={{ marginTop: 10 }}>
-        signed by your Privy wallet — funds land in your own Solana wallet, no custody.
+        signed by your Privy wallet — SOL lands back in your own Solana wallet, no custody.
       </div>
     </>
   );
