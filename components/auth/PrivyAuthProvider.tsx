@@ -32,12 +32,14 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
     setUser(handle);
   }, [handle, setUser]);
 
-  // poll the user's real USDC balance
+  // poll the user's real USDC (collateral) + native SOL (gas) balances
   const setUsdcBalance = useStrike((s) => s.setUsdcBalance);
+  const setSolBalance = useStrike((s) => s.setSolBalance);
   const setRefreshBalance = useStrike((s) => s.setRefreshBalance);
   useEffect(() => {
     if (!solAddress) {
       setUsdcBalance(null);
+      setSolBalance(null);
       setRefreshBalance(null);
       return;
     }
@@ -47,9 +49,10 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
         const r = await fetch(`/api/drift/balance?address=${solAddress}&network=${config.network}`);
         if (r.ok && alive) {
           const d = await r.json();
+          // on an RPC error the route returns null — keep the last known value rather than
+          // flashing $0 (which would read as an empty wallet and reject taps).
           if (typeof d.usdc === "number") setUsdcBalance(d.usdc);
-          // on an RPC error the route returns { usdc: null } — keep the last known value rather
-          // than flashing $0 (which would read as an empty wallet and reject taps).
+          if (typeof d.sol === "number") setSolBalance(d.sol);
         }
       } catch {
         /* network — keep last known balance */
@@ -63,7 +66,7 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
       clearInterval(h);
       setRefreshBalance(null);
     };
-  }, [solAddress, setUsdcBalance, setRefreshBalance]);
+  }, [solAddress, setUsdcBalance, setSolBalance, setRefreshBalance]);
 
   // register the connected user's 𝕏 identity keyed by their wallet address, so their own trades
   // in the feed/rails (which arrive by on-chain address) render with their real name + avatar.

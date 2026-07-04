@@ -47,6 +47,7 @@ interface StrikeState {
   displayPrice: number; // throttled (~2/s) live price for low-frequency UI (win-hint)
   feedStatus: { status: string; source: string };
   usdcBalance: number | null; // connected user's USDC in their wallet (deposit-able; null = unknown)
+  solBalance: number | null; // connected user's native SOL in their wallet (for gas)
   driftCollateral: number | null; // connected user's free USDC collateral on Drift (tradable margin)
   // live withdraw handler, registered by the Drift signer bridge (null until wired/connected)
   withdrawFn: ((amount: number, dest: string) => Promise<{ txhash?: string }>) | null;
@@ -72,6 +73,7 @@ interface StrikeState {
   setDisplayPrice: (p: number) => void;
   setFeedStatus: (status: string, source: string) => void;
   setUsdcBalance: (b: number | null) => void;
+  setSolBalance: (b: number | null) => void;
   setDriftCollateral: (b: number | null) => void;
   setWithdrawFn: (f: StrikeState["withdrawFn"]) => void;
   setDepositFn: (f: StrikeState["depositFn"]) => void;
@@ -121,6 +123,7 @@ export const useStrike = create<StrikeState>((set, get) => ({
   displayPrice: 0,
   feedStatus: { status: "connecting", source: "none" },
   usdcBalance: null,
+  solBalance: null,
   driftCollateral: null,
   withdrawFn: null,
   depositFn: null,
@@ -141,6 +144,7 @@ export const useStrike = create<StrikeState>((set, get) => ({
   setDisplayPrice: (p) => set({ displayPrice: p }),
   setFeedStatus: (status, source) => set({ feedStatus: { status, source } }),
   setUsdcBalance: (b) => set({ usdcBalance: b }),
+  setSolBalance: (b) => set({ solBalance: b }),
   setDriftCollateral: (b) => set({ driftCollateral: b }),
   setWithdrawFn: (f) => set({ withdrawFn: f }),
   setDepositFn: (f) => set({ depositFn: f }),

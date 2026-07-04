@@ -17,6 +17,7 @@ import { XLogo } from "./icons";
 export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" }) {
   const auth = useAuth();
   const bal = useStrike((s) => s.usdcBalance);
+  const sol = useStrike((s) => s.solBalance);
   const collateral = useStrike((s) => s.driftCollateral);
   const openSheet = useStrike((s) => s.openSheet);
   const closeSheet = useStrike((s) => s.closeSheet);
@@ -99,9 +100,15 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
   if (view === "wallet") {
     return (
       <>
-        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
           {balCard("Drift collateral · tradable", collateral, "#AB9FF2")}
           {balCard("Wallet USDC · idle", bal, "#8A8F98")}
+        </div>
+        <div
+          className="mono"
+          style={{ fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, color: sol != null && sol < 0.003 ? "#FFB23E" : "var(--wt4)" }}
+        >
+          ◎ {sol == null ? "…" : sol.toFixed(3)} SOL for gas{sol != null && sol < 0.003 ? " · add a little for fees" : ""}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button className="xgo" style={{ flex: 1 }} onClick={() => openSheet("deposit")}>
@@ -182,10 +189,16 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
             <i className="ph ph-copy" style={{ color: "var(--acc)", flexShrink: 0, fontSize: 16 }} />
           </button>
           <div className="sub" style={{ marginTop: 8 }}>
-            send <b>USDC</b> on <b>Solana</b> here from any exchange or wallet. USDC on Solana only — other tokens or networks may be lost.
+            send <b>USDC</b> (to trade) and a little <b>SOL</b> (for gas) on <b>Solana</b> here, from any exchange or wallet. Native SOL and USDC only — a different token or a wrong network may be lost.
           </div>
         </div>
         {balCard("in your wallet", bal, "#8A8F98")}
+        <div
+          className="mono"
+          style={{ fontSize: 11, fontWeight: 700, textAlign: "center", marginTop: 8, color: sol != null && sol < 0.003 ? "#FFB23E" : "var(--wt4)" }}
+        >
+          ◎ {sol == null ? "…" : sol.toFixed(3)} SOL for gas
+        </div>
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
           <input
             className="xin"

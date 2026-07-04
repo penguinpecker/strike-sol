@@ -114,6 +114,18 @@ export async function getUsdcBalance(address: string, net?: string): Promise<num
   }
 }
 
+// ── native SOL balance (for gas) via getBalance ──
+export async function getSolBalance(address: string, net?: string): Promise<number> {
+  if (!address) return 0;
+  const body = { jsonrpc: "2.0", id: 1, method: "getBalance", params: [address] };
+  const d = await fetchJSON<{ result?: { value?: number } }>(rpcUrl(net), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (d.result?.value ?? 0) / 1e9;
+}
+
 // ── recent trades tape (best-effort) ──
 // Drift's public data API is Cloudflare-gated for anonymous callers, so this is best-effort: it
 // returns [] on any failure and the community feed simply stays quiet (mainnet trades are sparse
