@@ -267,6 +267,7 @@ export class GameEngine {
     let openTxhash: string | undefined;
     if (this.opts.mode === "live") {
       this.opening = true;
+      s.showToast("opening on-chain — approve in your wallet…");
       try {
         const r = await this.signer.openMarket({ ...intent, symbol: this.opts.market, markPrice: this.price });
         marketIndex = r.marketIndex;

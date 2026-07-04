@@ -60,11 +60,29 @@ async function getClient(ctx: LiveContext): Promise<{ client: Any; connection: A
   const cc = clusterConfig(ctx.network);
   const connection = new web3.Connection(config.solanaRpc, "confirmed");
   const sdkConfig = drift.initialize({ env: cc.driftEnv });
+  // Subscribe to ONLY the markets we trade (SOL/BTC/ETH perps + USDC/SOL spot) instead of all ~50 —
+  // loading every market on the first tap is what made it hang for tens of seconds.
+  const perpMarketIndexes = [0, 1, 2];
+  const spotMarketIndexes = [0, 1];
+  const oracleInfos: Any[] = [];
+  const seen = new Set<string>();
+  const addOracle = (m: Any) => {
+    const k = m?.oracle?.toString();
+    if (m?.oracle && k && !seen.has(k)) {
+      seen.add(k);
+      oracleInfos.push({ publicKey: m.oracle, source: m.oracleSource });
+    }
+  };
+  for (const i of perpMarketIndexes) addOracle(drift.PerpMarkets[cc.driftEnv].find((x: { marketIndex: number }) => x.marketIndex === i));
+  for (const i of spotMarketIndexes) addOracle(drift.SpotMarkets[cc.driftEnv].find((x: { marketIndex: number }) => x.marketIndex === i));
   const client = new drift.DriftClient({
     connection: connection as Any,
     wallet: ctx.wallet as Any,
     programID: new web3.PublicKey(sdkConfig.DRIFT_PROGRAM_ID) as Any,
     env: cc.driftEnv,
+    perpMarketIndexes,
+    spotMarketIndexes,
+    oracleInfos,
     accountSubscription: { type: "websocket" },
   });
   await client.subscribe();
