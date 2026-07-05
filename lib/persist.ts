@@ -44,3 +44,17 @@ export function recordPlayer(row: { wallet: string; handle?: string | null; avat
     /* noop */
   }
 }
+
+/** Attribute the connected player to whoever referred them (an X username slug). */
+export function recordReferral(row: { wallet: string; handle?: string | null; referrer: string }): void {
+  try {
+    void fetch("/api/strike/referral", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(row),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* noop */
+  }
+}

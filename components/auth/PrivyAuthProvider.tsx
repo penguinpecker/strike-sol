@@ -4,7 +4,8 @@ import { useEffect, useMemo } from "react";
 import { usePrivy, useLogin, useWallets } from "@privy-io/react-auth";
 import { useStrike } from "@/lib/store";
 import { avatarUrl } from "@/lib/social";
-import { recordPlayer } from "@/lib/persist";
+import { recordPlayer, recordReferral } from "@/lib/persist";
+import { getRef } from "@/lib/ref";
 import { AuthContext, type AuthValue } from "./AuthContext";
 
 // Real 𝕏 OAuth via Privy. The login returns the user's Twitter profile (handle, name, pfp)
@@ -79,6 +80,12 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
     if (address && handle) {
       setIdentity(address, { name: name || handle, avatar });
       recordPlayer({ wallet: address, handle, avatar });
+      // attribute this signup to whoever referred them (if they arrived via a ?ref link and it
+      // isn't their own handle) — server enforces first-touch + no self-referral
+      const ref = getRef();
+      if (ref && ref.toLowerCase() !== handle.toLowerCase()) {
+        recordReferral({ wallet: address, handle, referrer: ref });
+      }
     }
   }, [address, handle, name, avatar, setIdentity]);
 

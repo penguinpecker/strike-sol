@@ -56,6 +56,12 @@ export interface PlayerRow {
   avatar?: string | null;
 }
 
+export interface ReferralRow {
+  referee_wallet: string;
+  referee_handle?: string | null;
+  referrer_handle: string; // an X username slug
+}
+
 /** Insert one settled call. */
 export function insertCall(row: CallRow): Promise<boolean> {
   return post("strike_calls", row, "return=minimal");
@@ -68,4 +74,10 @@ export function upsertPlayer(row: PlayerRow): Promise<boolean> {
     { ...row, last_seen: new Date().toISOString() },
     "return=minimal,resolution=merge-duplicates",
   );
+}
+
+/** Record who referred a player. First-touch: ignore-duplicates keeps the original referrer, so a
+ *  later visit through someone else's link never re-attributes the referee. */
+export function insertReferral(row: ReferralRow): Promise<boolean> {
+  return post("strike_referrals?on_conflict=referee_wallet", row, "return=minimal,resolution=ignore-duplicates");
 }

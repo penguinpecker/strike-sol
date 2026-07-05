@@ -37,6 +37,8 @@ export default function Strike() {
   const resolving = useStrike((s) => !!s.resolve);
 
   useEffect(() => {
+    // capture a referral slug from the share link (?ref=<x username>) on first landing
+    void import("@/lib/ref").then((m) => m.captureRef());
     // restore the prototype handle only when Privy isn't the auth backend
     if (!config.privyAppId) {
       try {

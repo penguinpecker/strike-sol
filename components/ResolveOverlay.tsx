@@ -31,7 +31,10 @@ export function ResolveOverlay() {
     const txt = win
       ? `Called ${base} ${arrow} on STRIKE for ${(pct >= 0 ? "+" : "") + pct}% at ${lev}x 🎯\ntap-to-trade perps on Avalanche — think you can beat me? 👇`
       : `Fumbled ${base} ${arrow} on STRIKE (${pct}% at ${lev}x) 💀\nrun it back — tap-to-trade perps on Avalanche 👇`;
-    const url = typeof window !== "undefined" ? window.location.origin : "https://strike-avalanche.vercel.app";
+    // the shared link carries the sharer's X username as a referral slug — anyone who plays through
+    // it is attributed to them (strikeit.app/?ref=<username>)
+    const origin = typeof window !== "undefined" ? window.location.origin : "https://strikeit.app";
+    const url = handle ? `${origin}/?ref=${encodeURIComponent(handle)}` : origin;
     const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(txt)}&url=${encodeURIComponent(url)}`;
     try {
       window.open(intent, "_blank", "noopener,noreferrer");
