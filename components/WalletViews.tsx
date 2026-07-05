@@ -4,37 +4,29 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { useStrike } from "@/lib/store";
 import { useAuth } from "./auth/AuthContext";
-import { fmt2, sol as fmtSol } from "@/lib/format";
-import { shortAddress } from "@/lib/solana/wallet";
+import { avax as fmtAvax } from "@/lib/format";
+import { shortAddress, isEvmAddress } from "@/lib/evm/wallet";
 import { XLogo } from "./icons";
 
-// Wallet / deposit / withdraw — the game runs on the user's native SOL.
-//   Wallet SOL     = spendable SOL in the wallet (what you play + deposit with)
-//   Drift margin   = SOL posted to Drift as collateral (backs live calls), shown as its USD value
-//   deposit  = wallet SOL  → Drift collateral
-//   withdraw = Drift collat → wallet SOL
+// Wallet / deposit / withdraw — the game runs on the user's native AVAX, straight from the wallet.
+// GMX has no venue margin account: collateral rides inside each position and returns on close, so
+//   deposit  = send AVAX to your address (receive)
+//   withdraw = send AVAX from your wallet to any address
 // Everything is signed by the user's own wallet; STRIKE never takes custody.
 export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" }) {
   const auth = useAuth();
-  const solBal = useStrike((s) => s.solBalance);
-  const collateral = useStrike((s) => s.driftCollateral); // USD value of Drift margin
+  const avaxBal = useStrike((s) => s.avaxBalance);
   const openSheet = useStrike((s) => s.openSheet);
   const closeSheet = useStrike((s) => s.closeSheet);
   const showToast = useStrike((s) => s.showToast);
   const refreshBalance = useStrike((s) => s.refreshBalance);
-  const refreshCollateral = useStrike((s) => s.refreshCollateral);
   const withdrawFn = useStrike((s) => s.withdrawFn);
-  const depositFn = useStrike((s) => s.depositFn);
   const [amt, setAmt] = useState("");
-  const [depAmt, setDepAmt] = useState("");
+  const [dest, setDest] = useState("");
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState<string | null>(null);
 
-  const addr = auth.solAddress;
-
-  useEffect(() => {
-    refreshCollateral?.();
-  }, [view, refreshCollateral]);
+  const addr = auth.address;
 
   useEffect(() => {
     if (view !== "deposit" || !addr) {
@@ -60,11 +52,11 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
       </>
     );
   }
-  const solNum = solBal ?? 0;
+  const balNum = avaxBal ?? 0;
 
   const nudge = () => {
-    setTimeout(() => { refreshBalance?.(); refreshCollateral?.(); }, 2500);
-    setTimeout(() => { refreshBalance?.(); refreshCollateral?.(); }, 8000);
+    setTimeout(() => refreshBalance?.(), 2500);
+    setTimeout(() => refreshBalance?.(), 8000);
   };
 
   const card = (label: string, display: string, accent: string) => (
@@ -78,8 +70,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
     return (
       <>
         <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          {card("Wallet SOL · your balance", solBal == null ? "…" : fmtSol(solBal), "#AB9FF2")}
-          {card("Drift margin · tradable", collateral == null ? "—" : `$${fmt2(collateral)}`, "#8A8F98")}
+          {card("Wallet AVAX · your balance", avaxBal == null ? "…" : fmtAvax(avaxBal), "#E84142")}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button className="xgo" style={{ flex: 1 }} onClick={() => openSheet("deposit")}>
@@ -103,23 +94,21 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
           </button>
         </div>
         <div className="sub" style={{ marginTop: 10 }}>
-          your funds stay in your wallet — STRIKE never holds them. Deposit posts SOL as Drift collateral to back a live call; it unlocks the moment the position closes.
+          your funds stay in your wallet — STRIKE never holds them. A live call locks its stake inside the GMX position and it returns the moment the position closes.
         </div>
       </>
     );
   }
 
   if (view === "deposit") {
-    const depNum = Number(depAmt) || 0;
-    const depValid = depNum > 0 && depNum <= solNum;
     return (
       <>
         <div className="sub" style={{ marginBottom: 10 }}>
-          <b>1.</b> send SOL to your address below to fund your wallet · <b>2.</b> deposit it into Drift to back your calls.
+          send AVAX to your address below — it lands in seconds and you&apos;re ready to play.
         </div>
-        <div style={{ borderRadius: 16, padding: "14px", background: "rgba(171,159,242,.07)", border: "1.5px solid rgba(171,159,242,.28)", marginBottom: 10 }}>
+        <div style={{ borderRadius: 16, padding: "14px", background: "rgba(232,65,66,.07)", border: "1.5px solid rgba(232,65,66,.28)", marginBottom: 10 }}>
           <div style={{ fontSize: 10, letterSpacing: ".12em", color: "var(--wt4)", fontWeight: 700, textTransform: "uppercase", marginBottom: 10 }}>
-            your Solana deposit address
+            your Avalanche deposit address
           </div>
           {qr && (
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
@@ -138,81 +127,61 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
             <i className="ph ph-copy" style={{ color: "var(--acc)", flexShrink: 0, fontSize: 16 }} />
           </button>
           <div className="sub" style={{ marginTop: 8 }}>
-            send <b>SOL</b> on <b>Solana</b> here from any exchange or wallet. Native SOL only — a wrong token or network may be lost.
+            send <b>AVAX</b> on <b>Avalanche C-Chain</b> here from any exchange or wallet. Native AVAX only — a wrong token or network may be lost.
           </div>
         </div>
-        {card("in your wallet", solBal == null ? "…" : fmtSol(solBal), "#8A8F98")}
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <input
-            className="xin"
-            inputMode="decimal"
-            placeholder="amount (SOL)"
-            value={depAmt}
-            onChange={(e) => setDepAmt(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            style={{ flex: 1 }}
-          />
-          <button className="xin" style={{ width: 64, cursor: "pointer", color: "var(--acc)" }} onClick={() => setDepAmt(String(Math.max(0, solNum - 0.03)))}>
-            MAX
-          </button>
-        </div>
-        <button
-          className="xgo"
-          disabled={!depValid || busy}
-          style={{ opacity: depValid && !busy ? 1 : 0.5 }}
-          onClick={async () => {
-            if (!depositFn) return showToast("deposit goes live once your wallet is connected");
-            setBusy(true);
-            try {
-              const r = await depositFn(depNum);
-              showToast(r.txhash && !r.txhash.startsWith("(") ? `deposited · ${r.txhash.slice(0, 10)}…` : "signed (broadcast off)");
-              setDepAmt("");
-              nudge();
-            } catch (e) {
-              showToast(e instanceof Error ? e.message : "deposit failed");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? "DEPOSITING…" : "DEPOSIT TO DRIFT"}
-        </button>
+        {card("in your wallet", avaxBal == null ? "…" : fmtAvax(avaxBal), "#8A8F98")}
         <div className="sub" style={{ marginTop: 10 }}>
-          signed by your Privy wallet — one Solana transaction. Keep ~0.03 SOL for account rent + gas.
+          that&apos;s it — no second step. Your wallet balance is your tradable balance; each call briefly fronts a ~0.01 AVAX execution deposit that refunds on fill.
         </div>
       </>
     );
   }
 
-  // withdraw — pull SOL out of Drift collateral back to your own wallet
+  // withdraw — send AVAX from the embedded wallet to any Avalanche address
   const amtNum = Number(amt) || 0;
-  const valid = amtNum > 0;
+  // leave headroom for gas + the refundable execution deposit of a live call
+  const maxOut = Math.max(0, balNum - 0.02);
+  const valid = amtNum > 0 && amtNum <= balNum && isEvmAddress(dest);
   return (
     <>
       <div className="sub" style={{ marginBottom: 8 }}>
-        withdraw <b>SOL</b> from Drift collateral back to your Solana wallet.
+        send <b>AVAX</b> from your game wallet to any <b>Avalanche C-Chain</b> address.
       </div>
-      {card("Drift margin · available", collateral == null ? "—" : `$${fmt2(collateral)}`, "#AB9FF2")}
+      {card("in your wallet", avaxBal == null ? "…" : fmtAvax(avaxBal), "#E84142")}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <input
           className="xin"
           inputMode="decimal"
-          placeholder="amount (SOL)"
+          placeholder="amount (AVAX)"
           value={amt}
           onChange={(e) => setAmt(e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
           style={{ flex: 1 }}
         />
+        <button className="xin" style={{ width: 64, cursor: "pointer", color: "var(--acc)" }} onClick={() => setAmt(maxOut.toFixed(4))}>
+          MAX
+        </button>
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <input
+          className="xin"
+          placeholder="destination address (0x…)"
+          value={dest}
+          onChange={(e) => setDest(e.target.value.trim())}
+          onKeyDown={(e) => e.stopPropagation()}
+          style={{ width: "100%" }}
+        />
       </div>
       <button
         className="xgo"
         disabled={!valid || busy}
-        style={{ opacity: valid && !busy ? 1 : 0.5 }}
+        style={{ opacity: valid && !busy ? 1 : 0.5, marginTop: 10 }}
         onClick={async () => {
-          if (!withdrawFn) return showToast("withdraw goes live once the wallet is funded");
+          if (!withdrawFn) return showToast("withdraw goes live once your wallet is connected");
           setBusy(true);
           try {
-            const r = await withdrawFn(amtNum, addr);
+            const r = await withdrawFn(amtNum, dest);
             showToast(r.txhash && !r.txhash.startsWith("(") ? `sent · ${r.txhash.slice(0, 10)}…` : "signed (broadcast off)");
             setAmt("");
             nudge();
@@ -226,7 +195,7 @@ export function WalletViews({ view }: { view: "wallet" | "deposit" | "withdraw" 
         {busy ? "SIGNING…" : "WITHDRAW"}
       </button>
       <div className="sub" style={{ marginTop: 10 }}>
-        signed by your Privy wallet — SOL lands back in your own Solana wallet, no custody.
+        signed by your Privy wallet — one Avalanche transaction, ~1s finality, gas under a cent. Double-check the address.
       </div>
     </>
   );

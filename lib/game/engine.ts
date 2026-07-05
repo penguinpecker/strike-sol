@@ -4,22 +4,22 @@ import type { RefObject } from "react";
 import gsap from "gsap";
 import confetti from "canvas-confetti";
 import { PriceFeed, type FeedSource, type FeedStatus } from "@/lib/feed/priceFeed";
-import { quoteCost, validateInputs, UnwiredSigner, DriftRailError, type Side, type Signer } from "@/lib/drift/rail";
+import { quoteCost, validateInputs, validateNotional, UnwiredSigner, GmxRailError, type Side, type Signer } from "@/lib/gmx/rail";
 import { useStrike } from "@/lib/store";
 import { config } from "@/lib/config";
-import { fmt, fmt2, sol } from "@/lib/format";
+import { fmt, fmt2, avax } from "@/lib/format";
 import { blip, chime, thud, haptic } from "@/lib/audio";
 import { loadAvatar, avatarImage, addrColor } from "@/lib/social";
 import { recordCall } from "@/lib/persist";
-import { marketDef } from "@/lib/drift/networks";
-import { shortAddress } from "@/lib/solana/wallet";
+import { marketDef, TOKENS } from "@/lib/gmx/networks";
+import { shortAddress } from "@/lib/evm/wallet";
 import type { Dir, Call, Marker } from "@/lib/types";
-import type { RecentTrade } from "@/lib/drift/types";
+import type { RecentTrade } from "@/lib/gmx/types";
 
 // Pull the most useful human-readable text out of whatever error the live path throws, so the user
-// sees the ACTUAL reason (e.g. "0x1771: insufficient collateral") instead of a generic message.
+// sees the ACTUAL reason (e.g. "InsufficientExecutionFee(…)") instead of a generic message.
 function errMsg(e: unknown, fallback: string): string {
-  if (e instanceof DriftRailError) return e.message;
+  if (e instanceof GmxRailError) return e.message;
   if (e instanceof Error && e.message) return e.message;
   return fallback;
 }
@@ -48,11 +48,11 @@ export interface EngineOpts {
   mode: "paper" | "live";
   market: string;
   roundMs: number;
-  primary: "pyth" | "binance";
-  pythFeedId: string;
+  primary: "gmx" | "binance";
+  base: string;
+  indexTokenDecimals: number;
   binanceSymbol: string;
   coinbaseProduct: string;
-  network: string;
   onStatus?: (s: FeedStatus, src: FeedSource) => void;
 }
 
@@ -68,6 +68,49 @@ const lerp = (a: RGB, b: RGB, t: number): RGB =>
   a.map((v, i) => Math.round(v + (b[i] - v) * t)) as RGB;
 
 const store = () => useStrike.getState();
+
+// ── crash/reload recovery for LIVE positions ──
+// A live GMX position is real on-chain money with no auto-close; the round is only a client
+// timer. If a receipt-wait times out or the tab reloads mid-round, the in-memory activeCall is lost
+// and the position would be stranded. So every live open is mirrored to localStorage keyed by the
+// trading account, and cleared only once its close confirms. On the next wallet-wire we reconcile:
+// if that exact (market, side) position is still open on-chain, we close it.
+interface PendingCall {
+  market: string;
+  dir: Dir;
+  stake: number;
+  lev: number;
+  entry: number;
+  t0: number;
+  orderKey?: string;
+  txhash?: string;
+}
+const pendingKey = (account: string) => `strike_pending_${account.toLowerCase()}`;
+function savePending(account: string, market: string, c: Call) {
+  try {
+    localStorage.setItem(
+      pendingKey(account),
+      JSON.stringify({ market, dir: c.dir, stake: c.stake, lev: c.lev, entry: c.entry, t0: c.t0, orderKey: c.orderKey, txhash: c.txhash } satisfies PendingCall),
+    );
+  } catch {
+    /* private mode / no storage — the beforeunload warning + in-memory close remain */
+  }
+}
+function readPending(account: string): PendingCall | null {
+  try {
+    const v = localStorage.getItem(pendingKey(account));
+    return v ? (JSON.parse(v) as PendingCall) : null;
+  } catch {
+    return null;
+  }
+}
+function clearPending(account: string) {
+  try {
+    localStorage.removeItem(pendingKey(account));
+  } catch {
+    /* noop */
+  }
+}
 
 export class GameEngine {
   private feed: PriceFeed;
@@ -109,7 +152,8 @@ export class GameEngine {
     this.signer = new UnwiredSigner();
     this.feed = new PriceFeed({
       primary: opts.primary,
-      pythFeedId: opts.pythFeedId,
+      base: opts.base,
+      indexTokenDecimals: opts.indexTokenDecimals,
       binanceSymbol: opts.binanceSymbol,
       coinbaseProduct: opts.coinbaseProduct,
       onTick: (t) => this.onPrice(t.price),
@@ -155,7 +199,7 @@ export class GameEngine {
         return;
       }
     } catch {
-      /* flat seed fallback (e.g. Binance geo-blocked) — the live Pyth feed fills in instantly */
+      /* flat seed fallback (e.g. Binance geo-blocked) — the live GMX feed fills in instantly */
     }
     const p0 = this.price || 63000;
     const now = Date.now();
@@ -167,9 +211,7 @@ export class GameEngine {
 
   private async loadPairConfig() {
     try {
-      const r = await fetch(
-        `/api/drift/pair-config?symbol=${encodeURIComponent(this.opts.market)}&network=${this.opts.network}`,
-      );
+      const r = await fetch(`/api/gmx/pair-config?symbol=${encodeURIComponent(this.opts.market)}`);
       if (r.ok) store().setPairConfig(await r.json());
     } catch {
       /* validation falls back to permissive */
@@ -207,22 +249,61 @@ export class GameEngine {
   setSigner(s: Signer | null) {
     if (s === null && this.activeCall && this.opts.mode === "live") return;
     this.signer = s ?? new UnwiredSigner();
+    // a freshly-wired live signer is our chance to recover a position stranded by a prior
+    // receipt-timeout or tab reload
+    if (s && this.opts.mode === "live") void this.reconcilePending();
   }
 
-  // Switch the traded market (e.g. BTC/USD <-> SOL/USD). Blocked mid-call. Swaps the price feed
-  // to the new market's Pyth feed, resets the chart, and reloads its pair config; trades then
-  // resolve to the new market's Drift perp automatically.
+  // Close any live position that a prior session opened but never confirmed closing. We only touch
+  // the position recorded in localStorage (the exact market+side STRIKE opened) — never an unrelated
+  // GMX position the wallet may hold — and never the one the user is actively in right now.
+  private reconciling = false;
+  private async reconcilePending() {
+    if (this.reconciling) return;
+    const account = this.signer.account;
+    if (!account || account === "(unwired)") return;
+    const p = readPending(account);
+    if (!p) return;
+    // if it matches the position the user is currently in, leave it to the normal close path
+    if (this.activeCall && p.market === this.opts.market && p.dir === this.activeCall.dir) return;
+    this.reconciling = true;
+    try {
+      const { listStrikePositions } = await import("@/lib/gmx/gmxTrade");
+      const open = await listStrikePositions(account as `0x${string}`);
+      const isLong = p.dir > 0;
+      const stillOpen = open.some((o) => o.symbol === p.market && o.isLong === isLong);
+      if (stillOpen) {
+        store().showToast(`recovering a stray ${p.market.split("/")[0]} position — closing…`);
+        await this.signer.closeMarket({ symbol: p.market, isLong, slippage: 0.01 });
+        store().showToast("stray position closed ✓");
+        this.refreshBalanceSoon();
+      }
+      clearPending(account);
+    } catch (e) {
+      // leave the record in place so the next wire/reload retries; surface it, don't hide it
+      console.warn("[strike] reconcile failed", e);
+      store().showToast("a previous position may still be open — reload to retry closing it");
+    } finally {
+      this.reconciling = false;
+    }
+  }
+
+  // Switch the traded market (e.g. BTC/USD <-> AVAX/USD). Blocked mid-call. Swaps the price feed
+  // to the new market's GMX oracle feed, resets the chart, and reloads its pair config; trades
+  // then resolve to the new market's GMX perp automatically.
   setMarket(market: string) {
     if (this.activeCall || this.opening || market === this.opts.market) return;
     const def = marketDef(market);
     this.opts.market = market;
-    this.opts.pythFeedId = def.pythFeedId;
+    this.opts.base = def.base;
+    this.opts.indexTokenDecimals = def.indexTokenDecimals;
     this.opts.binanceSymbol = def.binanceSymbol;
     this.opts.coinbaseProduct = def.coinbaseProduct;
     this.feed.stop();
     this.feed = new PriceFeed({
       primary: this.opts.primary,
-      pythFeedId: def.pythFeedId,
+      base: def.base,
+      indexTokenDecimals: def.indexTokenDecimals,
       binanceSymbol: def.binanceSymbol,
       coinbaseProduct: def.coinbaseProduct,
       onTick: (t) => this.onPrice(t.price),
@@ -241,8 +322,8 @@ export class GameEngine {
     this.feed.start();
   }
 
-  // Re-poll the connected wallet's real USDC shortly after a trade settles on-chain
-  // (open locks collateral; close returns it ± pnl). The 20s poll is the backstop.
+  // Re-poll the connected wallet's real AVAX shortly after a trade settles on-chain
+  // (open pulls collateral; close returns it ± pnl). The 20s poll is the backstop.
   private refreshBalanceSoon() {
     if (!store().refreshBalance) return;
     setTimeout(() => store().refreshBalance?.(), 2500);
@@ -259,41 +340,34 @@ export class GameEngine {
     if (this.activeCall || this.opening) return; // guard covers the whole in-flight open window
     const s = store();
     if (!s.user) return s.showToast("connect 𝕏 to trade");
-    const bal = s.solBalance ?? 0;
+    const bal = s.avaxBalance ?? 0;
     const intent = { stake: s.stake, leverage: s.levSel, side: (dir > 0 ? "long" : "short") as Side };
     const lowBal = () =>
-      s.showToast(bal <= 0 ? "no SOL — send some to play" : `${sol(intent.stake)} stake > your ${sol(bal)} — lower it`);
+      s.showToast(bal <= 0 ? "no AVAX — send some to play" : `${avax(intent.stake)} stake > your ${avax(bal)} — lower it`);
     const inp = validateInputs(intent);
     if (!inp.ok) return s.showToast(inp.reason || "bad input");
     // Only gate on balance for LIVE trades with a KNOWN balance — paper mode is playable with no
-    // funds, and a not-yet-loaded balance (null) must not silently reject taps.
-    if (this.opts.mode === "live" && s.solBalance != null && intent.stake > s.solBalance) return lowBal();
-    // live: enforce Drift's real leverage cap + min position, valued in USD (the stake is in SOL)
+    // funds, and a not-yet-loaded balance (null) must not silently reject taps. Live opens also
+    // front a small refundable execution deposit on top of the stake — leave headroom for it.
+    if (this.opts.mode === "live" && s.avaxBalance != null && intent.stake + 0.02 > s.avaxBalance) return lowBal();
+    // live: enforce GMX's real leverage cap + on-chain minimums, valued in USD (the stake is AVAX)
     if (this.opts.mode === "live" && s.pairConfig) {
-      const cfg = s.pairConfig;
-      if (intent.leverage > cfg.maxLeverage) return s.showToast(`max leverage is ${cfg.maxLeverage}x`);
-      const solUsd = s.solPrice ?? 0;
-      const stakeUsd = intent.stake * solUsd;
-      if (solUsd > 0 && stakeUsd * intent.leverage < cfg.minPositionValue) {
-        const need = Math.ceil(cfg.minPositionValue / (stakeUsd || 1));
-        return need > cfg.maxLeverage
-          ? s.showToast(`stake too small — raise it (min position $${cfg.minPositionValue})`)
-          : s.showToast(`~$${fmt2(stakeUsd)} needs ≥${need}x to clear the $${cfg.minPositionValue} min`);
-      }
+      const chk = validateNotional(intent, s.pairConfig, s.avaxPrice ?? 0);
+      if (!chk.ok) return s.showToast(chk.reason || "position too small");
     }
 
-    let marketIndex: number | undefined;
+    let openOrderKey: string | undefined;
     let openTxhash: string | undefined;
     if (this.opts.mode === "live") {
       this.opening = true;
-      s.showToast(config.liveBroadcast ? "opening on-chain — approve in your wallet…" : "opening (dry run — nothing sent)…");
+      s.showToast(config.liveBroadcast ? "opening on-chain — filling…" : "opening (dry run — nothing sent)…");
       try {
         const r = await withTimeout(
           this.signer.openMarket({ ...intent, symbol: this.opts.market, markPrice: this.price }),
           45_000,
           "opening",
         );
-        marketIndex = r.marketIndex;
+        openOrderKey = r.orderKey;
         openTxhash = r.txhash;
         // A dry-run (broadcast off) returns a sentinel txhash and sends nothing — never let it
         // masquerade as a real fill.
@@ -301,16 +375,27 @@ export class GameEngine {
           this.opening = false;
           return s.showToast("dry run — nothing was sent on-chain");
         }
-        s.showToast(openTxhash ? `position opened · ${openTxhash.slice(0, 8)}…` : "position opened");
+        // Honest status: only claim "opened" when the keeper fill is confirmed. A "pending" fill
+        // means the tx is broadcast but not yet confirmed — the round still starts (it almost
+        // always fills within the window), and reconcile/close handle the rare non-fill.
+        s.showToast(
+          r.fill === "executed"
+            ? `position opened · ${openTxhash.slice(0, 8)}…`
+            : "order sent — confirming fill…",
+        );
       } catch (e) {
+        // A keeper CANCELLATION is terminal (no position exists) — safe to abort the tap. Any other
+        // error may mean the tx is live in the mempool; the open path only throws on a pre-broadcast
+        // rejection or an on-chain revert (both = no position), so aborting here is correct.
         this.opening = false;
         return s.showToast(errMsg(e, "live trade failed"));
       }
     }
-    // round-trip cost (taker both sides + STRIKE fee + tx) — subtracted from PnL LIVE and at
-    // settle, so the running number already includes fees and doesn't jump when the round ends.
+    // round-trip cost (position fee both sides + swap-leg fees + STRIKE fee + tx) — subtracted from
+    // PnL LIVE and at settle, so the running number already includes fees and doesn't jump at the end.
+    const swapLeg = marketDef(this.opts.market).collateralToken !== TOKENS.wavax;
     const cost = s.pairConfig
-      ? quoteCost({ stake: s.stake, leverage: s.levSel, side: intent.side }, s.pairConfig, config.platformFeeRate).roundTripCost
+      ? quoteCost({ stake: s.stake, leverage: s.levSel, side: intent.side }, s.pairConfig, config.platformFeeRate, swapLeg).roundTripCost
       : 0;
     const call: Call = {
       dir,
@@ -321,11 +406,13 @@ export class GameEngine {
       dur: this.opts.roundMs,
       value: s.stake,
       cost,
-      marketIndex,
+      orderKey: openOrderKey,
       txhash: openTxhash,
     };
     this.activeCall = call;
     this.opening = false;
+    // mirror the live position to storage so a reload/crash mid-round can recover + close it
+    if (this.opts.mode === "live" && openTxhash) savePending(this.signer.account, this.opts.market, call);
     s.startCall(call);
     this.refreshBalanceSoon();
     haptic(20);
@@ -357,16 +444,31 @@ export class GameEngine {
   }
 
   // Close the real position on-chain when a live call settles. The UI settles on the local loop
-  // immediately; the chain close reconciles in the background with one retry (Drift nets one
-  // position per market, so closing the market closes the position this call opened).
-  private liveClose(c: Call) {
+  // immediately; the chain close reconciles in the background. Retries with backoff (a real
+  // leveraged position must actually be flattened), and the localStorage record is cleared ONLY
+  // once the close confirms — so if every retry fails, the next wallet-wire/reload reconciles it.
+  private liveClose(c: Call, market = this.opts.market, account = this.signer.account) {
     if (this.opts.mode !== "live") return;
+    const isLong = c.dir > 0;
+    const MAX = 3;
+    const done = () => clearPending(account);
     const attempt = (n: number): Promise<unknown> =>
-      withTimeout(this.signer.closeMarket({ symbol: this.opts.market, slippage: 0.02 }), 45_000, "closing").catch((e) => {
-        if (n < 1) return attempt(n + 1);
-        console.warn("[strike] live close failed", e);
-        store().showToast(errMsg(e, "on-chain close pending — check your Drift positions"));
-      });
+      withTimeout(this.signer.closeMarket({ symbol: market, isLong, slippage: 0.01 }), 45_000, "closing").then(
+        () => done(),
+        (e) => {
+          // "no open position" = the open never filled (keeper cancelled/refunded) — nothing to
+          // close; clear the record and move on.
+          if (e instanceof GmxRailError && e.code === "CHAIN_REJECTED" && /no open position/.test(e.message)) {
+            done();
+            return;
+          }
+          if (n < MAX - 1) return new Promise((r) => setTimeout(r, 2000 * (n + 1))).then(() => attempt(n + 1));
+          // out of retries: KEEP the pending record (next wire/reload will reconcile) and escalate a
+          // clear, non-transient message rather than a 1.8s toast that vanishes.
+          console.warn("[strike] live close failed after retries", e);
+          store().showToast(`⚠ ${market.split("/")[0]} position may still be open — reopen the app to auto-close it`);
+        },
+      );
     void attempt(0);
   }
 
@@ -382,6 +484,7 @@ export class GameEngine {
             { stake: c.stake, leverage: c.lev, side: c.dir > 0 ? "long" : "short" },
             s.pairConfig,
             config.platformFeeRate,
+            marketDef(this.opts.market).collateralToken !== TOKENS.wavax,
           ).roundTripCost
         : 0);
     const value = Math.max(0, c.value - cost);
@@ -432,14 +535,14 @@ export class GameEngine {
     while (this.markers.length > 16) this.markers.shift();
   }
 
-  // Poll REAL on-chain trades → the live feed + sentiment counts. Best-effort: Drift's public data
-  // API is gated, so the tape may be quiet — the game does not depend on it.
+  // Poll REAL on-chain trades → the live feed + sentiment counts. Best-effort: the GMX indexer
+  // lags the chain by ~20s and Avalanche flow is thin — the game does not depend on it.
   private async pollTrades() {
     const now = Date.now();
     if (now - this.lastTradesPoll < 8000) return;
     this.lastTradesPoll = now;
     try {
-      const r = await fetch(`/api/drift/trades?network=${this.opts.network}&limit=80`);
+      const r = await fetch(`/api/gmx/trades?limit=80`);
       if (!r.ok) return;
       const trades = (await r.json()) as RecentTrade[];
       if (!Array.isArray(trades) || !trades.length) return;
@@ -460,7 +563,7 @@ export class GameEngine {
           .sort((a, b) => b.pnl - a.pnl)
           .slice(0, 6),
       );
-      const key = (t: RecentTrade) => `${t.account}:${t.ts}:${t.marketIndex}:${t.price}`;
+      const key = (t: RecentTrade) => `${t.account}:${t.ts}:${t.symbol}:${t.price}:${t.isOpen}`;
       // API is newest-first; add oldest→newest so the newest lands on top of the feed.
       const ordered = [...trades].reverse();
       const toAdd = this.tradesSeeded ? ordered : ordered.slice(-10);
@@ -526,6 +629,19 @@ export class GameEngine {
 
   private wireGlobalListeners() {
     const sig = this.listeners.signal;
+    // In live mode, warn before leaving with an open position — the round is a client timer with no
+    // on-chain auto-close, so navigating away mid-round would strand real leveraged exposure until
+    // the next reconcile. (Recovery still happens on reload; this just prevents a silent surprise.)
+    addEventListener(
+      "beforeunload",
+      (e) => {
+        if (this.opts.mode === "live" && (this.activeCall || this.opening)) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      },
+      { signal: sig },
+    );
     addEventListener(
       "keydown",
       (e) => {
@@ -643,11 +759,11 @@ export class GameEngine {
     const val = Math.max(0, c.stake * (1 + move * c.lev) - (c.cost ?? 0));
     const pnl = val - c.stake;
     const pnlEl = this.refs.pnl.current;
-    if (pnlEl) pnlEl.textContent = (pnl >= 0 ? "+" : "−") + sol(Math.abs(pnl), 4);
+    if (pnlEl) pnlEl.textContent = (pnl >= 0 ? "+" : "−") + avax(Math.abs(pnl), 4);
     const lsub = this.refs.lsub.current;
     if (lsub) lsub.textContent = `${this.opts.market.split("/")[0]} $${fmt2(this.headP)} · entry $${fmt2(c.entry)} · ${c.lev}x`;
     const cashBtn = this.refs.cashBtn.current;
-    if (cashBtn) cashBtn.textContent = "CASH OUT · " + sol(val, 4);
+    if (cashBtn) cashBtn.textContent = "CASH OUT · " + avax(val, 4);
     const now = Date.now();
     const left = Math.max(0, c.dur - (now - c.t0));
     const tleft = this.refs.tleft.current;

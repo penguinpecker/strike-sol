@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from "react";
 import type { Dir } from "@/lib/types";
-import type { Signer } from "@/lib/drift/rail";
+import type { Signer } from "@/lib/gmx/rail";
 
 export interface EngineActions {
   makeCall: (d: Dir) => void;

@@ -19,7 +19,7 @@ export function MockAuthProvider({ children }: { children: React.ReactNode }) {
       name: handle,
       avatar: handle ? avatarUrl(handle) : null,
       link: handle ? `https://x.com/${handle}` : null,
-      solAddress: null, // no embedded wallet in the prototype flow
+      address: null, // no embedded wallet in the prototype flow
       login: () => openSheet("x"),
       logout: () => {
         setUser(null);

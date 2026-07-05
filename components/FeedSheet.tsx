@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useStrike, dirLabel } from "@/lib/store";
 import { addrColor } from "@/lib/social";
-import { fmt2, sol } from "@/lib/format";
+import { fmt2, avax } from "@/lib/format";
 import { Avatar } from "./Avatar";
 import { useEngine } from "./engineContext";
 import { useAuth } from "./auth/AuthContext";
 import { WalletViews } from "./WalletViews";
-import { shortAddress } from "@/lib/solana/wallet";
+import { shortAddress } from "@/lib/evm/wallet";
 import { config } from "@/lib/config";
 import type { SheetType } from "@/lib/store";
-import type { RecentTrade } from "@/lib/drift/types";
+import type { RecentTrade } from "@/lib/gmx/types";
 
 const ago = (ts: number) => {
   const s = Math.max(0, (Date.now() - ts) / 1000);
@@ -26,9 +26,9 @@ const HEAD: Record<Exclude<SheetType, null>, [string, string]> = {
   ranks: ["🏆 Top traders", "live · ranked by realized pnl on-chain"],
   you: ["You", ""],
   x: ["Sign in with 𝕏", "your pfp becomes your pin on the chart — entries, exits, PnL%"],
-  wallet: ["Wallet", "your SOL on Solana · non-custodial"],
-  deposit: ["Deposit", "fund Drift with SOL"],
-  withdraw: ["Withdraw", "SOL back to your wallet"],
+  wallet: ["Wallet", "your AVAX on Avalanche · non-custodial"],
+  deposit: ["Deposit", "fund your wallet with AVAX"],
+  withdraw: ["Withdraw", "send AVAX anywhere"],
 };
 
 export function FeedSheet() {
@@ -39,7 +39,7 @@ export function FeedSheet() {
   const hits = useStrike((s) => s.hits);
   const total = useStrike((s) => s.total);
   const streak = useStrike((s) => s.streak);
-  const solBalance = useStrike((s) => s.solBalance);
+  const avaxBalance = useStrike((s) => s.avaxBalance);
   const closeSheet = useStrike((s) => s.closeSheet);
   const setUser = useStrike((s) => s.setUser);
   const showToast = useStrike((s) => s.showToast);
@@ -53,14 +53,14 @@ export function FeedSheet() {
   const [myTrades, setMyTrades] = useState<RecentTrade[]>([]);
 
   // a feed row is joinable only if it's on the market STRIKE actually trades (BTC/USD); other-market
-  // rows are view-only, so JOIN can never silently open a BTC position for an ETH/SOL call.
+  // rows are view-only, so JOIN can never silently open a BTC position for an AVAX call.
   const joinable = (sym?: string) => !sym || sym === config.market;
 
   // load the connected wallet's real on-chain trade history (realized PnL) for the "you" tab
   useEffect(() => {
-    if (sheet !== "you" || !auth.solAddress) return;
+    if (sheet !== "you" || !auth.address) return;
     let on = true;
-    fetch(`/api/drift/my-trades?address=${auth.solAddress}&network=${config.network}`)
+    fetch(`/api/gmx/my-trades?address=${auth.address}`)
       .then((r) => r.json())
       .then((d) => {
         if (on && Array.isArray(d)) setMyTrades(d as RecentTrade[]);
@@ -69,7 +69,7 @@ export function FeedSheet() {
     return () => {
       on = false;
     };
-  }, [sheet, auth.solAddress]);
+  }, [sheet, auth.address]);
 
   // keep the last view during the slide-down so content doesn't vanish mid-animation
   const [view, setView] = useState<Exclude<SheetType, null>>("feed");
@@ -98,7 +98,7 @@ export function FeedSheet() {
   const [title, sub] = HEAD[view];
   const subText =
     view === "you"
-      ? `${hits}/${total} called · streak ${streak}${solBalance != null ? ` · ${sol(solBalance)}` : ""}`
+      ? `${hits}/${total} called · streak ${streak}${avaxBalance != null ? ` · ${avax(avaxBalance)}` : ""}`
       : sub;
 
   return (
@@ -177,11 +177,11 @@ export function FeedSheet() {
             <div className="sub">loading on-chain traders…</div>
           ))}
 
-        {view === "you" && auth.solAddress && (
+        {view === "you" && auth.address && (
           <div className="fi" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <i className="ph-fill ph-wallet" style={{ color: "#00FF85" }} />
-              <div className="nm">Solana wallet</div>
+              <div className="nm">Avalanche wallet</div>
             </div>
             <button
               className="mono"
@@ -195,11 +195,11 @@ export function FeedSheet() {
                 padding: 0,
               }}
               onClick={() => {
-                navigator.clipboard?.writeText(auth.solAddress!).then(() => showToast("address copied"));
+                navigator.clipboard?.writeText(auth.address!).then(() => showToast("address copied"));
               }}
               title="tap to copy"
             >
-              {shortAddress(auth.solAddress, 8, 8)} <i className="ph ph-copy" />
+              {shortAddress(auth.address, 8, 8)} <i className="ph ph-copy" />
             </button>
           </div>
         )}

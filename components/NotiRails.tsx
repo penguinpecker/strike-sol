@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useStrike, dirLabel } from "@/lib/store";
-import { fmt2, sol } from "@/lib/format";
+import { fmt2, avax } from "@/lib/format";
 import { config } from "@/lib/config";
 import { Avatar } from "./Avatar";
 import { useEngine } from "./engineContext";
 import { useAuth } from "./auth/AuthContext";
-import type { RecentTrade } from "@/lib/drift/types";
+import type { RecentTrade } from "@/lib/gmx/types";
 
 // Compact "time ago" for the rail (2m, 3h, 1d).
 const ago = (ts: number) => {
@@ -19,12 +19,12 @@ const ago = (ts: number) => {
 };
 
 // Floating glass rails over the chart (desktop ≥1100px; hidden on mobile via CSS).
-//   LEFT  = ⚡ live calls (JOIN) + 🕘 ALL TRADES (the full community / Drift-wide feed).
+//   LEFT  = ⚡ live calls (JOIN) + 🕘 ALL TRADES (the full community / GMX-wide feed).
 //   RIGHT = 👤 YOUR PAST TRADES (the connected wallet's own settled history) + your summary.
 export function NotiRails() {
   const notis = useStrike((s) => s.notis);
   const feed = useStrike((s) => s.feed);
-  const solBalance = useStrike((s) => s.solBalance);
+  const avaxBalance = useStrike((s) => s.avaxBalance);
   const hits = useStrike((s) => s.hits);
   const total = useStrike((s) => s.total);
   const streak = useStrike((s) => s.streak);
@@ -33,21 +33,21 @@ export function NotiRails() {
   const auth = useAuth();
 
   const idName = (a: string | undefined, fb: string) => (a && identities[a.toLowerCase()]?.name) || fb;
-  const past = feed.filter((f) => f.done); // ALL TRADES — community / Drift-wide
+  const past = feed.filter((f) => f.done); // ALL TRADES — community / GMX-wide
   // JOIN only opens the market STRIKE trades (BTC/USD); other-market rows stay view-only.
   const joinable = (sym?: string) => !sym || sym === config.market;
 
   // YOUR PAST TRADES — the connected wallet's own real on-chain settled history.
   const [mine, setMine] = useState<RecentTrade[]>([]);
   useEffect(() => {
-    const addr = auth.solAddress;
+    const addr = auth.address;
     if (!addr) {
       setMine([]);
       return;
     }
     let on = true;
     const load = () =>
-      fetch(`/api/drift/my-trades?address=${addr}&network=${config.network}`)
+      fetch(`/api/gmx/my-trades?address=${addr}`)
         .then((r) => r.json())
         .then((d) => on && Array.isArray(d) && setMine(d as RecentTrade[]))
         .catch(() => {});
@@ -57,7 +57,7 @@ export function NotiRails() {
       on = false;
       clearInterval(t);
     };
-  }, [auth.solAddress]);
+  }, [auth.address]);
   const myPast = mine.filter((t) => !t.isOpen);
 
   const pnlMeta = { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 } as const;
@@ -170,7 +170,7 @@ export function NotiRails() {
           <div className="fx">
             <div className="nm">you</div>
             <div className="ds">
-              {solBalance != null ? `${sol(solBalance)} · ` : ""}
+              {avaxBalance != null ? `${avax(avaxBalance)} · ` : ""}
               {hits}/{total} called
             </div>
           </div>

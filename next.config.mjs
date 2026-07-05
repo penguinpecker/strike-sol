@@ -5,12 +5,10 @@ const nextConfig = {
   images: {
     remotePatterns: [{ protocol: 'https', hostname: 'unavatar.io' }],
   },
-  // @drift-labs/sdk + @solana pull in node-ish deps; keep them external to the server bundle
-  // and let the client dynamic-import the heavy trade path only when a live action fires.
   webpack: (config) => {
     config.externals = config.externals || [];
     config.resolve.fallback = { ...config.resolve.fallback, fs: false };
-    // Optional Privy features we don't use (Farcaster mini-app, Stripe fiat onramp) — stub them
+    // Optional peer deps the @privy-io/react-auth SDK references but that we don't use — stub them
     // so the bundler doesn't warn about the unresolved optional imports.
     config.resolve.alias = {
       ...config.resolve.alias,

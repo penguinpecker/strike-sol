@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPrice } from "@/lib/drift/server";
+import { getPrice } from "@/lib/gmx/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

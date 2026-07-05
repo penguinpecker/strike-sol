@@ -3,8 +3,9 @@
 import { useEffect } from "react";
 import { useStrike } from "@/lib/store";
 import { LEVS, STAKES, FULL_SEND } from "@/lib/constants";
-import { quoteCost } from "@/lib/drift/rail";
-import { fmt, fmt2, sol } from "@/lib/format";
+import { quoteCost } from "@/lib/gmx/rail";
+import { marketDef, TOKENS } from "@/lib/gmx/networks";
+import { fmt, fmt2, avax } from "@/lib/format";
 import { config, baseAsset } from "@/lib/config";
 import { blip, haptic } from "@/lib/audio";
 
@@ -12,33 +13,34 @@ function WinHint() {
   const stake = useStrike((s) => s.stake);
   const lev = useStrike((s) => s.levSel);
   const cfg = useStrike((s) => s.pairConfig);
-  const solUsd = useStrike((s) => s.solPrice) || 0;
+  const avaxUsd = useStrike((s) => s.avaxPrice) || 0;
   const price = useStrike((s) => s.displayPrice) || 63000;
 
   const skull = lev >= FULL_SEND ? <> · bust = lose it all <i className="ph-fill ph-skull" /></> : null;
 
   if (cfg) {
-    const q = quoteCost({ stake, leverage: lev, side: "long" }, cfg, config.platformFeeRate);
-    // min position is a USD notional; the stake is SOL, so value it first.
-    const notionalUsd = stake * solUsd * lev;
-    if (config.mode === "live" && solUsd > 0 && notionalUsd < cfg.minPositionValue) {
-      const minLev = Math.min(cfg.maxLeverage, Math.ceil(cfg.minPositionValue / (stake * solUsd || 1)));
+    const swapLeg = marketDef(cfg.symbol).collateralToken !== TOKENS.wavax;
+    const q = quoteCost({ stake, leverage: lev, side: "long" }, cfg, config.platformFeeRate, swapLeg);
+    // min position is a USD notional; the stake is AVAX, so value it first.
+    const notionalUsd = stake * avaxUsd * lev;
+    if (config.mode === "live" && avaxUsd > 0 && notionalUsd < cfg.minPositionValue) {
+      const minLev = Math.min(cfg.maxLeverage, Math.ceil(cfg.minPositionValue / (stake * avaxUsd || 1)));
       return (
         <>
-          {sol(stake)} (~${fmt2(stake * solUsd)}) at {lev}x = ${fmt(notionalUsd)} — below ${cfg.minPositionValue} min · need <b>{minLev}x+</b>
+          {avax(stake)} (~${fmt2(stake * avaxUsd)}) at {lev}x = ${fmt(notionalUsd)} — below ${cfg.minPositionValue} min · need <b>{minLev}x+</b>
         </>
       );
     }
     const beUsd = q.breakevenMoveUsd(price);
     return (
       <>
-        {sol(stake)} at <b>{lev}x</b> — fees {sol(q.roundTripCost, 4)} · clear <b>${fmt(beUsd)}</b> to win{skull}
+        {avax(stake)} at <b>{lev}x</b> — fees {avax(q.roundTripCost, 4)} · clear <b>${fmt(beUsd)}</b> to win{skull}
       </>
     );
   }
   return (
     <>
-      {sol(stake)} at <b>{lev}x</b> — a typical 30s ride swings <b>±{sol(stake * lev * 0.005, 4)}</b>
+      {avax(stake)} at <b>{lev}x</b> — a typical 60s ride swings <b>±{avax(stake * lev * 0.007, 4)}</b>
       {skull}
     </>
   );
@@ -47,13 +49,13 @@ function WinHint() {
 export function Controls() {
   const live = useStrike((s) => !!s.call);
   const stake = useStrike((s) => s.stake);
-  const bal = useStrike((s) => s.solBalance);
+  const bal = useStrike((s) => s.avaxBalance);
   const levSel = useStrike((s) => s.levSel);
   const setStake = useStrike((s) => s.setStake);
   const setLev = useStrike((s) => s.setLev);
   const d = live ? "none" : undefined;
 
-  // keep the selected stake within the real SOL balance — fall to the largest affordable preset.
+  // keep the selected stake within the real AVAX balance — fall to the largest affordable preset.
   useEffect(() => {
     if (bal == null || stake <= bal) return;
     const fit = STAKES.filter((v) => v <= bal);
@@ -90,13 +92,13 @@ export function Controls() {
             <div
               key={s}
               className={`sk${s === stake ? " sel" : ""}${tooBig ? " dim" : ""}`}
-              title={tooBig ? `needs ${sol(s)} · you have ${sol(bal ?? 0)}` : undefined}
+              title={tooBig ? `needs ${avax(s)} · you have ${avax(bal ?? 0)}` : undefined}
               onClick={() => {
                 setStake(s);
                 haptic();
               }}
             >
-              {sol(s)}
+              {avax(s)}
             </div>
           );
         })}

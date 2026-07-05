@@ -11,7 +11,7 @@ import type {
   ResolveData,
   Tab,
 } from "./types";
-import type { DriftPairConfig } from "./drift/types";
+import type { GmxPairConfig } from "./gmx/types";
 import { config } from "./config";
 
 // Discrete game state (everything React renders). The 60fps hot path — price, pnl,
@@ -20,7 +20,7 @@ import { config } from "./config";
 export type SheetType = "feed" | "ranks" | "you" | "x" | "wallet" | "deposit" | "withdraw" | null;
 
 interface StrikeState {
-  market: string; // the market being traded, e.g. "BTC/USD" (switchable BTC <-> SOL)
+  market: string; // the market being traded, e.g. "BTC/USD" (switchable BTC <-> AVAX)
   stake: number;
   levSel: number;
   streak: number;
@@ -33,31 +33,25 @@ interface StrikeState {
   upN: number;
   downN: number;
   leaderboard: LeaderEntry[];
-  // wallet-address (base58, lowercased) -> resolved 𝕏 identity (name + avatar). Seeded with the
+  // wallet-address (0x…, lowercased) -> resolved 𝕏 identity (name + avatar). Seeded with the
   // connected user; extensible to other STRIKE users. Unknown addrs render as identicons.
   identities: Record<string, { name: string; avatar: string | null }>;
-  myAddress: string | null; // connected wallet's base58 (lowercased) — to dedupe the user's own trades
+  myAddress: string | null; // connected wallet's 0x address (lowercased) — to dedupe the user's own trades
   user: { h: string } | null;
   tab: Tab;
   sheet: SheetType;
   resolve: ResolveData | null;
   kol: KolData | null;
   toast: { msg: string; id: number } | null;
-  pairConfig: DriftPairConfig | null;
+  pairConfig: GmxPairConfig | null;
   displayPrice: number; // throttled (~2/s) live price for low-frequency UI (win-hint)
   feedStatus: { status: string; source: string };
-  usdcBalance: number | null; // connected user's USDC in their wallet (deposit-able; null = unknown)
-  solBalance: number | null; // connected user's native SOL in their wallet (for gas)
-  solPrice: number | null; // live SOL/USD (to value SOL stakes for the on-chain min-notional check)
-  driftCollateral: number | null; // connected user's free USDC collateral on Drift (tradable margin)
-  // live withdraw handler, registered by the Drift signer bridge (null until wired/connected)
+  avaxBalance: number | null; // connected user's native AVAX (stake + gas; null = unknown)
+  avaxPrice: number | null; // live AVAX/USD (to value AVAX stakes for the on-chain min-size check)
+  // live withdraw handler (native AVAX transfer out), registered by the signer bridge
   withdrawFn: ((amount: number, dest: string) => Promise<{ txhash?: string }>) | null;
-  // live deposit handler (wallet -> Drift collateral), registered by the Drift signer bridge
-  depositFn: ((amount: number) => Promise<{ txhash?: string }>) | null;
-  // re-poll the connected wallet's real USDC balance now (registered by the auth provider)
+  // re-poll the connected wallet's real AVAX balance now (registered by the auth provider)
   refreshBalance: (() => void) | null;
-  // re-read the connected wallet's Drift collateral now (registered by the signer bridge)
-  refreshCollateral: (() => void) | null;
   _fid: number;
 
   // pure actions
@@ -70,17 +64,13 @@ interface StrikeState {
   closeSheet: () => void;
   showToast: (msg: string) => void;
   setKol: (k: KolData | null) => void;
-  setPairConfig: (c: DriftPairConfig | null) => void;
+  setPairConfig: (c: GmxPairConfig | null) => void;
   setDisplayPrice: (p: number) => void;
   setFeedStatus: (status: string, source: string) => void;
-  setUsdcBalance: (b: number | null) => void;
-  setSolBalance: (b: number | null) => void;
-  setSolPrice: (p: number | null) => void;
-  setDriftCollateral: (b: number | null) => void;
+  setAvaxBalance: (b: number | null) => void;
+  setAvaxPrice: (p: number | null) => void;
   setWithdrawFn: (f: StrikeState["withdrawFn"]) => void;
-  setDepositFn: (f: StrikeState["depositFn"]) => void;
   setRefreshBalance: (f: StrikeState["refreshBalance"]) => void;
-  setRefreshCollateral: (f: StrikeState["refreshCollateral"]) => void;
 
   // game-state mutations (called by the engine with price-derived values)
   startCall: (call: Call) => void;
@@ -101,7 +91,7 @@ interface StrikeState {
 
 export const useStrike = create<StrikeState>((set, get) => ({
   market: config.market,
-  stake: 0.05,
+  stake: 0.5,
   levSel: 10,
   streak: 0,
   hits: 0,
@@ -124,14 +114,10 @@ export const useStrike = create<StrikeState>((set, get) => ({
   pairConfig: null,
   displayPrice: 0,
   feedStatus: { status: "connecting", source: "none" },
-  usdcBalance: null,
-  solBalance: null,
-  solPrice: null,
-  driftCollateral: null,
+  avaxBalance: null,
+  avaxPrice: null,
   withdrawFn: null,
-  depositFn: null,
   refreshBalance: null,
-  refreshCollateral: null,
   _fid: 1,
 
   setMarket: (m) => set({ market: m }),
@@ -146,14 +132,10 @@ export const useStrike = create<StrikeState>((set, get) => ({
   setPairConfig: (c) => set({ pairConfig: c }),
   setDisplayPrice: (p) => set({ displayPrice: p }),
   setFeedStatus: (status, source) => set({ feedStatus: { status, source } }),
-  setUsdcBalance: (b) => set({ usdcBalance: b }),
-  setSolBalance: (b) => set({ solBalance: b }),
-  setSolPrice: (p) => set({ solPrice: p }),
-  setDriftCollateral: (b) => set({ driftCollateral: b }),
+  setAvaxBalance: (b) => set({ avaxBalance: b }),
+  setAvaxPrice: (p) => set({ avaxPrice: p }),
   setWithdrawFn: (f) => set({ withdrawFn: f }),
-  setDepositFn: (f) => set({ depositFn: f }),
   setRefreshBalance: (f) => set({ refreshBalance: f }),
-  setRefreshCollateral: (f) => set({ refreshCollateral: f }),
 
   startCall: (call) => set({ call, resolve: null }),
 

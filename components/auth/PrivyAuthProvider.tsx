@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { usePrivy, useLogin } from "@privy-io/react-auth";
-import { useWallets } from "@privy-io/react-auth/solana";
+import { usePrivy, useLogin, useWallets } from "@privy-io/react-auth";
 import { useStrike } from "@/lib/store";
 import { avatarUrl } from "@/lib/social";
 import { recordPlayer } from "@/lib/persist";
-import { config } from "@/lib/config";
 import { AuthContext, type AuthValue } from "./AuthContext";
 
 // Real 𝕏 OAuth via Privy. The login returns the user's Twitter profile (handle, name, pfp)
-// directly — no separate X/Twitter API needed — and spins up a Solana embedded wallet.
+// directly — no separate X/Twitter API needed — and spins up an EVM embedded wallet.
 export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
   const { authenticated, user, logout } = usePrivy();
   const { login } = useLogin();
@@ -22,25 +20,24 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
   const name = tw?.name ?? handle;
   const avatar = tw?.profilePictureUrl ?? (handle ? avatarUrl(handle) : null);
 
-  // The Twitter login spins up a Privy Solana embedded wallet; its base58 address is the account
-  // we trade Drift perps with. No key handling — Privy signs on demand.
-  const embedded = wallets.find((w) => w.standardWallet?.name === "Privy") ?? wallets[0];
-  const solAddress = authenticated && embedded?.address ? embedded.address : null;
+  // The Twitter login spins up a Privy EVM embedded wallet; its 0x address is the account we
+  // trade GMX perps with on Avalanche. No key handling — Privy signs on demand.
+  const embedded = wallets.find((w) => w.walletClientType === "privy") ?? wallets[0];
+  const address = authenticated && embedded?.address ? embedded.address : null;
 
   // keep store.user in sync so chart pins + avatars resolve to the logged-in handle
   useEffect(() => {
     setUser(handle);
   }, [handle, setUser]);
 
-  // poll the user's real USDC (collateral) + native SOL (gas) balances + the live SOL/USD price
-  const setUsdcBalance = useStrike((s) => s.setUsdcBalance);
-  const setSolBalance = useStrike((s) => s.setSolBalance);
-  const setSolPrice = useStrike((s) => s.setSolPrice);
+  // poll the user's real native AVAX balance + the live AVAX/USD price (values AVAX stakes for
+  // the on-chain min-size check + the USD hint)
+  const setAvaxBalance = useStrike((s) => s.setAvaxBalance);
+  const setAvaxPrice = useStrike((s) => s.setAvaxPrice);
   const setRefreshBalance = useStrike((s) => s.setRefreshBalance);
   useEffect(() => {
-    if (!solAddress) {
-      setUsdcBalance(null);
-      setSolBalance(null);
+    if (!address) {
+      setAvaxBalance(null);
       setRefreshBalance(null);
       return;
     }
@@ -48,19 +45,18 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
     const fetchBal = async () => {
       try {
         const [rb, rp] = await Promise.all([
-          fetch(`/api/drift/balance?address=${solAddress}&network=${config.network}`),
-          fetch(`/api/drift/price?symbol=SOL/USD`),
+          fetch(`/api/gmx/balance?address=${address}`),
+          fetch(`/api/gmx/price?symbol=AVAX/USD`),
         ]);
         if (rb.ok && alive) {
           const d = await rb.json();
           // on an RPC error the route returns null — keep the last known value rather than
-          // flashing $0 (which would read as an empty wallet and reject taps).
-          if (typeof d.usdc === "number") setUsdcBalance(d.usdc);
-          if (typeof d.sol === "number") setSolBalance(d.sol);
+          // flashing 0 (which would read as an empty wallet and reject taps).
+          if (typeof d.avax === "number") setAvaxBalance(d.avax);
         }
         if (rp.ok && alive) {
           const p = await rp.json();
-          if (typeof p.price === "number") setSolPrice(p.price);
+          if (typeof p.price === "number") setAvaxPrice(p.price);
         }
       } catch {
         /* network — keep last known values */
@@ -74,24 +70,24 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
       clearInterval(h);
       setRefreshBalance(null);
     };
-  }, [solAddress, setUsdcBalance, setSolBalance, setSolPrice, setRefreshBalance]);
+  }, [address, setAvaxBalance, setAvaxPrice, setRefreshBalance]);
 
   // register the connected user's 𝕏 identity keyed by their wallet address, so their own trades
   // in the feed/rails (which arrive by on-chain address) render with their real name + avatar.
   const setIdentity = useStrike((s) => s.setIdentity);
   useEffect(() => {
-    if (solAddress && handle) {
-      setIdentity(solAddress, { name: name || handle, avatar });
-      recordPlayer({ wallet: solAddress, handle, avatar });
+    if (address && handle) {
+      setIdentity(address, { name: name || handle, avatar });
+      recordPlayer({ wallet: address, handle, avatar });
     }
-  }, [solAddress, handle, name, avatar, setIdentity]);
+  }, [address, handle, name, avatar, setIdentity]);
 
   // track the connected wallet address so the engine can dedupe the user's own trades out of
   // the community feed (they show via the local "you" item / "Your Past Trades" instead).
   const setMyAddress = useStrike((s) => s.setMyAddress);
   useEffect(() => {
-    setMyAddress(solAddress);
-  }, [solAddress, setMyAddress]);
+    setMyAddress(address);
+  }, [address, setMyAddress]);
 
   const value = useMemo<AuthValue>(
     () => ({
@@ -100,12 +96,12 @@ export function PrivyAuthProvider({ children }: { children: React.ReactNode }) {
       name,
       avatar,
       link: handle ? `https://x.com/${handle}` : null,
-      solAddress,
+      address,
       login: () => login(),
       logout: () => logout(),
       usingPrivy: true,
     }),
-    [handle, name, avatar, solAddress, login, logout],
+    [handle, name, avatar, address, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

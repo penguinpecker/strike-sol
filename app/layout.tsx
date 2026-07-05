@@ -5,10 +5,10 @@ import { Providers } from "@/components/Providers";
 export const metadata: Metadata = {
   title: "STRIKE — call it",
   description:
-    "Tap-to-trade BTC perps. Call ↑ or ↓ on the live price, ride 30 seconds, cash out. On-chain on Solana via Drift.",
+    "Tap-to-trade BTC perps. Call ↑ or ↓ on the live price, ride 60 seconds, cash out. On-chain on Avalanche via GMX.",
   openGraph: {
     title: "STRIKE — call it",
-    description: "Where's BTC in 30 seconds? Tap ↑/↓, ride the chart, flex the call.",
+    description: "Where's BTC in 60 seconds? Tap ↑/↓, ride the chart, flex the call.",
     type: "website",
   },
 };

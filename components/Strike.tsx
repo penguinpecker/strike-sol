@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { GameEngine, type EngineRefs } from "@/lib/game/engine";
 import { config } from "@/lib/config";
-import { marketDef } from "@/lib/drift/networks";
+import { marketDef } from "@/lib/gmx/networks";
 import { useStrike } from "@/lib/store";
 import { EngineContext, type EngineActions } from "./engineContext";
 import type { Dir } from "@/lib/types";
@@ -62,10 +62,10 @@ export default function Strike() {
       market: config.market,
       roundMs: config.roundMs,
       primary: config.priceFeed,
-      pythFeedId: def.pythFeedId,
+      base: def.base,
+      indexTokenDecimals: def.indexTokenDecimals,
       binanceSymbol: def.binanceSymbol,
       coinbaseProduct: def.coinbaseProduct,
-      network: config.network,
       onStatus: (s, src) => useStrike.getState().setFeedStatus(s, src),
     });
     engineRef.current = engine;

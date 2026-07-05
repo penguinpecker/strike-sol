@@ -10,10 +10,10 @@ export interface Call {
   t0: number;
   dur: number;
   value: number;
-  cost?: number; // round-trip fee (taker x2 + STRIKE fee + tx), applied to PnL live and at settle
+  cost?: number; // round-trip fee (position fee x2 + tx), applied to PnL live and at settle
   _lastS?: number;
-  marketIndex?: number; // Drift market this live call opened (for the matching close)
-  txhash?: string; // live open tx signature (for persistence)
+  orderKey?: string; // GMX order key of the live open (fill tracking / debugging)
+  txhash?: string; // live open tx hash (for persistence)
 }
 
 export interface FeedItem {
@@ -26,7 +26,7 @@ export interface FeedItem {
   done: boolean;
   pnl: number;
   you?: boolean;
-  account?: string; // raw base58 address (for resolving a real 𝕏 identity at display time)
+  account?: string; // raw 0x address (for resolving a real 𝕏 identity at display time)
   ts?: number; // trade timestamp (ms) for "time ago"
   lev?: number; // leverage (notional / collateral)
 }

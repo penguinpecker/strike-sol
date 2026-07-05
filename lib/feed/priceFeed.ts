@@ -1,14 +1,17 @@
 // Real-time price feed for the chart + settlement reference.
 //
-//   primary:  Pyth Hermes SSE stream — the SAME oracle Drift settles against, so the number you
-//             watch is the number your position fills at (no display-vs-fill divergence).
+//   primary:  gmxinfra tickers — the public mirror of the Chainlink Data Streams reports GMX
+//             keepers fill against, so the number you watch is the number your position fills at
+//             (no display-vs-fill divergence). REST at a 1s server cadence; we poll at 700ms.
 //   fallback: Binance trade stream (wss) → Coinbase ticker (wss) → REST polling.
 //
-// A staleness watchdog forces failover if the active source silently stops ticking (a half-open
-// socket or a stalled SSE), so the chart never freezes on a live-looking-but-dead price.
+// A staleness watchdog forces failover if the active source silently stops ticking (a stalled
+// poll loop or a half-open socket), so the chart never freezes on a live-looking-but-dead price.
 // Client-side only.
 
-export type FeedSource = "pyth" | "binance" | "coinbase" | "rest" | "none";
+import { GMX_ORACLE_URL } from "@/lib/gmx/networks";
+
+export type FeedSource = "gmx" | "binance" | "coinbase" | "rest" | "none";
 export interface PriceTick {
   price: number;
   ts: number; // local receive time (ms)
@@ -17,8 +20,9 @@ export interface PriceTick {
 export type FeedStatus = "connecting" | "live" | "reconnecting" | "down";
 
 interface FeedOpts {
-  primary: "pyth" | "binance";
-  pythFeedId: string; // 0x… hex
+  primary: "gmx" | "binance";
+  base: string; // gmxinfra tokenSymbol, e.g. "BTC" / "AVAX"
+  indexTokenDecimals: number; // raw ticker scale = USD*1e30 / 10^decimals
   binanceSymbol: string; // e.g. "btcusdt"
   coinbaseProduct: string; // e.g. "BTC-USD"
   onTick: (t: PriceTick) => void;
@@ -26,11 +30,11 @@ interface FeedOpts {
 }
 
 const STALE_MS = 6000; // no tick for this long on a "live" source → treat as dead, fail over
-const HERMES = "https://hermes.pyth.network";
+const GMX_POLL_MS = 700;
 
 export class PriceFeed {
   private ws: WebSocket | null = null;
-  private es: EventSource | null = null;
+  private gmxTimer: ReturnType<typeof setInterval> | null = null;
   private restTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
@@ -39,6 +43,7 @@ export class PriceFeed {
   private stopped = false;
   private last = 0;
   private lastTickAt = 0;
+  private gmxErrors = 0;
 
   constructor(private opts: FeedOpts) {}
 
@@ -46,7 +51,7 @@ export class PriceFeed {
     this.stopped = false;
     this.lastTickAt = Date.now();
     this.startWatchdog();
-    if (this.opts.primary === "pyth") this.connectPyth();
+    if (this.opts.primary === "gmx") this.connectGmx();
     else this.connectBinance();
   }
 
@@ -77,8 +82,7 @@ export class PriceFeed {
     this.opts.onTick({ price, ts: this.lastTickAt, source });
   }
 
-  // If the active source goes quiet while claiming "live", tear it down and fail over. This is
-  // the guard the original feed lacked (a stalled socket froze the price under a "live" label).
+  // If the active source goes quiet while claiming "live", tear it down and fail over.
   private startWatchdog() {
     this.watchdog = setInterval(() => {
       if (this.stopped || this.source === "none") return;
@@ -100,14 +104,9 @@ export class PriceFeed {
       }
       this.ws = null;
     }
-    if (this.es) {
-      try {
-        this.es.onmessage = this.es.onerror = null;
-        this.es.close();
-      } catch {
-        /* noop */
-      }
-      this.es = null;
+    if (this.gmxTimer) {
+      clearInterval(this.gmxTimer);
+      this.gmxTimer = null;
     }
     if (this.restTimer) {
       clearInterval(this.restTimer);
@@ -119,47 +118,41 @@ export class PriceFeed {
     }
   }
 
-  // ── Pyth Hermes (primary) — SSE stream of parsed price updates ──
-  private connectPyth() {
+  // ── gmxinfra tickers (primary) — the fill-basis price, polled at 700ms ──
+  private connectGmx() {
     if (this.stopped) return;
-    this.source = "pyth";
+    this.source = "gmx";
     this.status(this.attempts === 0 ? "connecting" : "reconnecting");
-    const id = this.opts.pythFeedId;
-    const url = `${HERMES}/v2/updates/price/stream?ids%5B%5D=${encodeURIComponent(id)}&parsed=true&encoding=hex`;
-    let es: EventSource;
-    try {
-      es = new EventSource(url);
-    } catch {
-      return this.connectBinance();
-    }
-    this.es = es;
-    es.onopen = () => {
-      this.attempts = 0;
-      this.status("live");
-    };
-    es.onmessage = (ev) => {
+    this.gmxErrors = 0;
+    const scale = 10 ** (30 - this.opts.indexTokenDecimals);
+    let inflight = false;
+    const poll = async () => {
+      if (inflight || this.stopped) return;
+      inflight = true;
       try {
-        const d = JSON.parse(ev.data as string) as {
-          parsed?: { price: { price: string; expo: number } }[];
-        };
-        const p = d.parsed?.[0]?.price;
-        if (p) this.emit(Number(p.price) * 10 ** p.expo, "pyth");
-      } catch {
-        /* ignore malformed frame */
-      }
-    };
-    es.onerror = () => {
-      // EventSource auto-reconnects, but if Hermes is hard-down we escalate to Binance after a beat.
-      if (this.stopped) return;
-      if (this.attempts < 2) {
-        this.attempts++;
-        this.status("reconnecting");
-      } else {
+        const r = await fetch(`${GMX_ORACLE_URL}/prices/tickers`, { cache: "no-store" });
+        if (!r.ok) throw new Error(String(r.status));
+        const list = (await r.json()) as { tokenSymbol: string; minPrice: string; maxPrice: string }[];
+        const t = list.find((x) => x.tokenSymbol === this.opts.base);
+        if (!t) throw new Error("no ticker");
+        const mid = (Number(t.minPrice) + Number(t.maxPrice)) / 2;
+        this.emit(mid / scale, "gmx");
+        this.gmxErrors = 0;
         this.attempts = 0;
-        this.cleanup();
-        this.connectBinance();
+        this.status("live");
+      } catch {
+        // transient errors ride; a burst of failures escalates to Binance before the watchdog bites
+        this.gmxErrors++;
+        if (this.gmxErrors >= 4) {
+          this.cleanup();
+          this.connectBinance();
+        }
+      } finally {
+        inflight = false;
       }
     };
+    void poll();
+    this.gmxTimer = setInterval(poll, GMX_POLL_MS);
   }
 
   // ── Binance (fallback / alt-primary) ──
@@ -271,20 +264,20 @@ export class PriceFeed {
     this.reconnectTimer = setTimeout(() => {
       this.cleanup();
       this.attempts = 0;
-      if (this.opts.primary === "pyth") this.connectPyth();
+      if (this.opts.primary === "gmx") this.connectGmx();
       else this.connectBinance();
     }, 20_000);
   }
 
   private failover() {
     if (this.stopped) return;
-    if (this.source === "pyth") this.connectBinance();
+    if (this.source === "gmx") this.connectBinance();
     else if (this.source === "binance") this.connectCoinbase();
     else if (this.source === "coinbase") this.startRest();
     else {
       // rest already the floor — bounce back to the top and retry
       this.attempts = 0;
-      if (this.opts.primary === "pyth") this.connectPyth();
+      if (this.opts.primary === "gmx") this.connectGmx();
       else this.connectBinance();
     }
   }

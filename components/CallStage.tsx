@@ -25,7 +25,7 @@ export function CallStage({ priceRef, pnlRef, lsubRef, tleftRef, ringRef }: Prop
     <div className="stage">
       <div id="idleWrap" style={{ display: live ? "none" : "flex", flexDirection: "column", alignItems: "center" }}>
         <h1 className="q" id="q">
-          {levSel >= FULL_SEND ? `FULL SEND — where's ${base} in 30 seconds?` : `Where's ${base} in 30 seconds?`}
+          {levSel >= FULL_SEND ? `FULL SEND — where's ${base} in 60 seconds?` : `Where's ${base} in 60 seconds?`}
         </h1>
         <div className="bignum mono" id="price" ref={priceRef}>
           <small>$</small>—

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import gsap from "gsap";
 import { useStrike } from "@/lib/store";
-import { fmt, sol } from "@/lib/format";
+import { fmt, avax } from "@/lib/format";
 import { BrandMark } from "./icons";
 import { useAuth } from "./auth/AuthContext";
 
@@ -24,23 +24,26 @@ export function ResolveOverlay() {
   if (!r) return null;
   const { how, win, pnl, pct, entry, dir, lev, secs, streak } = r;
 
-  const share = async () => {
-    const txt = `I just ${win ? "CALLED" : "fumbled"} ${base} on STRIKE ${(pct >= 0 ? "+" : "") + pct}%${handle ? ` — x.com/${handle}` : ""}`;
+  // Open a pre-filled X/Twitter post. The app URL rides along as the tweet's `url` param so anyone
+  // who sees the post can tap through and play.
+  const share = () => {
+    const arrow = dir > 0 ? "↑" : "↓";
+    const txt = win
+      ? `Called ${base} ${arrow} on STRIKE for ${(pct >= 0 ? "+" : "") + pct}% at ${lev}x 🎯\ntap-to-trade perps on Avalanche — think you can beat me? 👇`
+      : `Fumbled ${base} ${arrow} on STRIKE (${pct}% at ${lev}x) 💀\nrun it back — tap-to-trade perps on Avalanche 👇`;
+    const url = typeof window !== "undefined" ? window.location.origin : "https://strike-avalanche.vercel.app";
+    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(txt)}&url=${encodeURIComponent(url)}`;
     try {
-      if (navigator.share) await navigator.share({ text: txt });
-      else {
-        await navigator.clipboard.writeText(txt);
-        showToast("copied — go flex");
-      }
+      window.open(intent, "_blank", "noopener,noreferrer");
     } catch {
-      /* cancelled */
+      showToast("couldn't open X — try again");
     }
   };
 
   return (
     <div id="res" data-overlay style={{ display: "flex" }}>
       <div className="big" id="rbig">
-        {(pnl >= 0 ? "+" : "−") + sol(Math.abs(pnl), 4)}
+        {(pnl >= 0 ? "+" : "−") + avax(Math.abs(pnl), 4)}
       </div>
       <div className="word" id="rword">
         {how === "bust" ? (

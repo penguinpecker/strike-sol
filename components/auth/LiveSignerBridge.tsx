@@ -4,62 +4,47 @@ import { useEffect } from "react";
 import { useStrike } from "@/lib/store";
 import { useAuth } from "./AuthContext";
 import { useEngine } from "../engineContext";
-import { usePrivySolanaSigner } from "./usePrivySolanaSigner";
-import { makeDriftSigner, withdrawVia, depositVia, collateralVia } from "@/lib/drift/driftSigner";
-import { config } from "@/lib/config";
+import { usePrivyEvmSigner } from "./usePrivyEvmSigner";
+import { makeGmxSigner, withdrawVia } from "@/lib/gmx/gmxSigner";
 
-// Renders nothing. While a Privy Solana wallet is connected, it injects a live Drift signer into
-// the engine (so live-mode taps open/close real perps) and registers the deposit/withdraw handlers
+// Renders nothing. While a Privy EVM wallet is connected, it injects a live GMX signer into the
+// engine (so live-mode taps open/close real perps on Avalanche) and registers the withdraw handler
 // the wallet sheet calls. The signer is rebuilt whenever the connected address changes, so an
 // account switch can never trade with a previous user's wallet.
 export function LiveSignerBridge() {
-  const { getWallet, ready, address } = usePrivySolanaSigner();
-  const { solAddress } = useAuth();
+  const { getProvider, ready, address } = usePrivyEvmSigner();
+  const { address: authAddress } = useAuth();
   const { setSigner } = useEngine();
   const setWithdrawFn = useStrike((s) => s.setWithdrawFn);
-  const setDepositFn = useStrike((s) => s.setDepositFn);
-  const setDriftCollateral = useStrike((s) => s.setDriftCollateral);
-  const setRefreshCollateral = useStrike((s) => s.setRefreshCollateral);
 
   useEffect(() => {
-    const account = solAddress || address;
+    const account = (authAddress || address) as `0x${string}` | null;
     if (!ready || !account) {
       setSigner(null);
       setWithdrawFn(null);
-      setDepositFn(null);
-      setRefreshCollateral(null);
-      setDriftCollateral(null);
-      return;
-    }
-    const wallet = getWallet();
-    if (!wallet) {
-      setSigner(null);
-      setWithdrawFn(null);
-      setDepositFn(null);
-      setRefreshCollateral(null);
-      setDriftCollateral(null);
       return;
     }
 
-    const ctx = { account, wallet, network: config.network };
-    setSigner(makeDriftSigner(ctx));
-    setWithdrawFn(async (amount) => withdrawVia(ctx, amount));
-    setDepositFn(async (amount) => depositVia(ctx, amount));
-    // read Drift collateral on demand (opening the wallet sheet / after a deposit or withdraw)
-    setRefreshCollateral(() => {
-      collateralVia(ctx)
-        .then((c) => setDriftCollateral(c))
-        .catch(() => {});
-    });
+    let cancelled = false;
+    void (async () => {
+      const provider = await getProvider();
+      if (cancelled) return;
+      if (!provider) {
+        setSigner(null);
+        setWithdrawFn(null);
+        return;
+      }
+      const ctx = { account, provider };
+      setSigner(makeGmxSigner(ctx));
+      setWithdrawFn(async (amount, dest) => withdrawVia(ctx, amount, dest));
+    })();
 
     return () => {
+      cancelled = true;
       setSigner(null);
       setWithdrawFn(null);
-      setDepositFn(null);
-      setRefreshCollateral(null);
-      setDriftCollateral(null);
     };
-  }, [ready, address, solAddress, getWallet, setSigner, setWithdrawFn, setDepositFn, setRefreshCollateral, setDriftCollateral]);
+  }, [ready, address, authAddress, getProvider, setSigner, setWithdrawFn]);
 
   return null;
 }

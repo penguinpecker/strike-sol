@@ -3,9 +3,9 @@
 import { useStrike } from "@/lib/store";
 import { useEngine } from "./engineContext";
 
-// Markets exposed for trading in the UI. Both resolve to a live Drift perp (BTC-PERP / SOL-PERP)
-// and their own Pyth feed; switching is blocked mid-call by the engine.
-const TRADABLE = ["BTC/USD", "SOL/USD"];
+// Markets exposed for trading in the UI. Both resolve to a live GMX v2 market on Avalanche
+// and their own GMX oracle feed; switching is blocked mid-call by the engine.
+const TRADABLE = ["BTC/USD", "AVAX/USD"];
 
 export function MarketSelect() {
   const market = useStrike((s) => s.market);

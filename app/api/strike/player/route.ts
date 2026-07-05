@@ -4,7 +4,7 @@ import { upsertPlayer, supabaseConfigured } from "@/lib/supabase/rest";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Upsert the connected player (by wallet). Best-effort; needs a wallet (Privy Solana users).
+// Upsert the connected player (by wallet). Best-effort; needs a wallet (Privy EVM users).
 export async function POST(req: NextRequest) {
   if (!supabaseConfigured()) return NextResponse.json({ ok: false, reason: "supabase not configured" });
   let body: Record<string, unknown>;
